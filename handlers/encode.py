@@ -9,9 +9,7 @@ from aiogram.filters import Command
 from utils.db import is_approved
 from utils.ffprobe import probe, get_streams_by_type, stream_label, get_duration, get_extension
 from utils.ffmpeg import build_ffmpeg_cmd, run_ffmpeg
-from utils.progress import (
-    encode_progress_text, download_progress_text, upload_progress_text
-)
+from utils.progress import encode_progress_text, download_progress_text
 
 router = Router()
 
@@ -36,26 +34,43 @@ def audio_keyboard(streams, selected):
         lang = s.get("tags", {}).get("language", "und")
         title = s.get("tags", {}).get("title", "")
         channels = s.get("channels", "")
-
-        label_parts = [f"[{lang.upper()}]", codec.upper()]
+        ch = "Stereo" if channels == 2 else "Mono" if channels == 1 else f"{channels}ch" if channels else ""
+        parts = [f"[{lang.upper()}]", codec.upper()]
         if title:
-            label_parts.append(title)
-        if channels:
-            ch = "Stereo" if channels == 2 else "Mono" if channels == 1 else f"{channels}ch"
-            label_parts.append(ch)
-
-        label = " · ".join(label_parts)
-        tick = "✓ " if idx in selected else ""
-        buttons.append([
-            InlineKeyboardButton(
-                text=f"{tick}{label}",
-                callback_data=f"aud:{idx}"
-            )
-        ])
-    buttons.append([
-        InlineKeyboardButton(text="Confirm Selection", callback_data="aud_done")
-    ])
+            parts.append(title)
+        if ch:
+            parts.append(ch)
+        label = " · ".join(parts)
+        tick = "✓  " if idx in selected else "      "
+        buttons.append([InlineKeyboardButton(text=f"{tick}{label}", callback_data=f"aud:{idx}")])
+    buttons.append([InlineKeyboardButton(text="Confirm Selection", callback_data="aud_done")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+async def download_with_progress(bot: Bot, file_path: str, dest: str, total: int, status_msg):
+    last_update = [0]
+    downloaded = 0
+    chunk_size = 1024 * 512
+
+    file_url = f"https://api.telegram.org/file/bot{bot.token}/{file_path}"
+
+    import aiohttp
+    async with aiohttp.ClientSession() as session:
+        async with session.get(file_url) as resp:
+            with open(dest, "wb") as f:
+                async for chunk in resp.content.iter_chunked(chunk_size):
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    now = time.time()
+                    if now - last_update[0] >= 3:
+                        last_update[0] = now
+                        try:
+                            await status_msg.edit_text(
+                                download_progress_text(downloaded, total),
+                                parse_mode="HTML"
+                            )
+                        except Exception:
+                            pass
 
 
 async def process_queue():
@@ -169,17 +184,20 @@ async def cmd_compress(message: Message, state: FSMContext):
     doc = replied.document or replied.video
     file_name = getattr(doc, "file_name", None) or f"input_{doc.file_id}"
     file_id = doc.file_id
+    file_size = doc.file_size or 0
 
     status_msg = await message.reply(
-        "<b>Downloading file...</b>",
+        "<b>ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ</b>\n\n"
+        "<b>ᴘʀᴏɢʀᴇss:</b> <code>0.0%</code>\n"
+        "<code>[▱▱▱▱▱▱▱▱▱▱]</code>",
         parse_mode="HTML"
     )
 
     bot: Bot = message.bot
-    file = await bot.get_file(file_id)
+    tg_file = await bot.get_file(file_id)
     input_path = os.path.join(TEMP_DIR, file_name)
 
-    await bot.download_file(file.file_path, destination=input_path, chunk_size=1024 * 512)
+    await download_with_progress(bot, tg_file.file_path, input_path, file_size, status_msg)
 
     info = await probe(input_path)
     audio_streams = get_streams_by_type(info, "audio")
@@ -194,12 +212,10 @@ async def cmd_compress(message: Message, state: FSMContext):
     )
 
     if not audio_streams:
-        await state.update_data(audio_selected=[])
-        await _queue_encode(message, state, status_msg, bot)
+        await _queue_encode(state, status_msg, bot, message.chat.id)
         return
 
     await state.set_state(EncodeFlow.selecting_audio)
-
     kb = audio_keyboard(audio_streams, [])
     await status_msg.edit_text(
         "<b>Select audio tracks to keep.</b>\n\n"
@@ -274,10 +290,7 @@ async def cb_cancel(cb: CallbackQuery, state: FSMContext):
     if input_path and os.path.exists(input_path):
         os.remove(input_path)
     await state.clear()
-    await cb.message.edit_text(
-        "<b>Encoding cancelled.</b>",
-        parse_mode="HTML"
-    )
+    await cb.message.edit_text("<b>Encoding cancelled.</b>", parse_mode="HTML")
     await cb.answer()
 
 
@@ -287,7 +300,6 @@ async def cb_start_encode(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
 
     data = await state.get_data()
-
     task = {
         "input_path": data["input_path"],
         "file_name": data["file_name"],
@@ -298,7 +310,6 @@ async def cb_start_encode(cb: CallbackQuery, state: FSMContext):
     }
 
     position = encode_queue.qsize()
-
     await encode_queue.put(task)
     await state.clear()
 
@@ -313,21 +324,18 @@ async def cb_start_encode(cb: CallbackQuery, state: FSMContext):
         )
 
 
-async def _queue_encode(message, state, status_msg, bot):
+async def _queue_encode(state, status_msg, bot, chat_id):
     global queue_running
     data = await state.get_data()
-
     task = {
         "input_path": data["input_path"],
         "file_name": data["file_name"],
         "audio_selected": [],
         "status_msg": status_msg,
         "bot": bot,
-        "chat_id": data["chat_id"],
+        "chat_id": chat_id,
     }
-
     await encode_queue.put(task)
     await state.clear()
-
     if not queue_running:
         asyncio.create_task(process_queue())

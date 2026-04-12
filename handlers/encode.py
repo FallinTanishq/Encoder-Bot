@@ -26,17 +26,6 @@ class EncodeFlow(StatesGroup):
     encoding = State()
 
 
-def group_guard(handler):
-    async def wrapper(message: Message, state: FSMContext, *args, **kwargs):
-        if message.chat.type == "private":
-            return
-        if not is_approved(message.chat.id):
-            return
-        return await handler(message, state, *args, **kwargs)
-    wrapper.__name__ = handler.__name__
-    return wrapper
-
-
 def stream_keyboard(streams, selected, action_prefix, done_prefix):
     buttons = []
     for s in streams:
@@ -56,8 +45,12 @@ def stream_keyboard(streams, selected, action_prefix, done_prefix):
 
 
 @router.message(F.document | F.video)
-@group_guard
 async def handle_file(message: Message, state: FSMContext):
+    if message.chat.type == "private":
+        return
+    if not is_approved(message.chat.id):
+        return
+
     doc = message.document or message.video
     file_name = getattr(doc, "file_name", None) or f"input_{doc.file_id}"
     file_id = doc.file_id
@@ -82,20 +75,6 @@ async def handle_file(message: Message, state: FSMContext):
     input_path = os.path.join(TEMP_DIR, file_name)
 
     total = doc.file_size or 0
-    last_update = [0]
-
-    async def dl_progress(downloaded, total_):
-        now = time.time()
-        if now - last_update[0] < 2:
-            return
-        last_update[0] = now
-        try:
-            await status_msg.edit_text(
-                download_progress_text(downloaded, total_),
-                parse_mode="HTML"
-            )
-        except Exception:
-            pass
 
     await bot.download_file(file.file_path, destination=input_path, chunk_size=1024 * 512)
 
@@ -123,7 +102,7 @@ async def handle_file(message: Message, state: FSMContext):
     )
 
 
-async def _ask_subtitles(msg: Message, state: FSMContext, sub_streams):
+async def _ask_subtitles(msg, state: FSMContext, sub_streams):
     await state.set_state(EncodeFlow.selecting_subtitle)
     if not sub_streams:
         await state.update_data(subtitle_selected=[])
@@ -139,14 +118,13 @@ async def _ask_subtitles(msg: Message, state: FSMContext, sub_streams):
     )
 
 
-async def _ask_confirm(msg: Message, state: FSMContext):
+async def _ask_confirm(msg, state: FSMContext):
     await state.set_state(EncodeFlow.confirming)
     data = await state.get_data()
-    s = data
-    audio_indices = s.get("audio_selected", [])
-    sub_indices = s.get("subtitle_selected", [])
-    audio_streams = s.get("audio_streams", [])
-    sub_streams = s.get("sub_streams", [])
+    audio_indices = data.get("audio_selected", [])
+    sub_indices = data.get("subtitle_selected", [])
+    audio_streams = data.get("audio_streams", [])
+    sub_streams = data.get("sub_streams", [])
 
     def fmt_streams(streams, indices):
         chosen = [st for st in streams if st.get("index") in indices]
@@ -283,21 +261,6 @@ async def cb_start_encode(cb: CallbackQuery, state: FSMContext):
         "<code>[▱▱▱▱▱▱▱▱▱▱]</code>",
         parse_mode="HTML"
     )
-
-    last_ul = [0]
-
-    async def ul_callback(uploaded, total):
-        now = time.time()
-        if now - last_ul[0] < 3:
-            return
-        last_ul[0] = now
-        try:
-            await status_msg.edit_text(
-                upload_progress_text(uploaded, total),
-                parse_mode="HTML"
-            )
-        except Exception:
-            pass
 
     bot: Bot = cb.message.bot
     with open(output_path, "rb") as f:

@@ -148,6 +148,9 @@ async def run_encode_task(task):
 
     last_ul = [0]
 
+    
+    main_loop = asyncio.get_event_loop()
+
     async def _upload():
         async def ul_progress(current, total):
             now = time.time()
@@ -156,9 +159,12 @@ async def run_encode_task(task):
             last_ul[0] = now
             try:
                 from utils.progress import upload_progress_text
-                await status_msg.edit_text(
-                    upload_progress_text(current, total),
-                    parse_mode="HTML"
+                asyncio.run_coroutine_threadsafe(
+                    status_msg.edit_text(
+                        upload_progress_text(current, total),
+                        parse_mode="HTML"
+                    ),
+                    main_loop
                 )
             except Exception:
                 pass

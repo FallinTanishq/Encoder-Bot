@@ -18,6 +18,7 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 encode_queue = asyncio.Queue()
 queue_running = False
 pyro_client = None
+pyro_loop = None
 
 
 class EncodeFlow(StatesGroup):
@@ -50,20 +51,24 @@ def audio_keyboard(streams, selected):
 async def pyro_download(chat_id: int, message_id: int, dest: str, file_size: int, status_msg):
     last_update = [0]
 
-    async def progress(current, total):
-        now = time.time()
-        if now - last_update[0] >= 3:
-            last_update[0] = now
-            try:
-                await status_msg.edit_text(
-                    download_progress_text(current, total),
-                    parse_mode="HTML"
-                )
-            except Exception:
-                pass
+    async def _download():
+        async def progress(current, total):
+            now = time.time()
+            if now - last_update[0] >= 3:
+                last_update[0] = now
+                try:
+                    await status_msg.edit_text(
+                        download_progress_text(current, total),
+                        parse_mode="HTML"
+                    )
+                except Exception:
+                    pass
 
-    msg = await pyro_client.get_messages(chat_id, message_id)
-    await pyro_client.download_media(msg, file_name=dest, progress=progress)
+        msg = await pyro_client.get_messages(chat_id, message_id)
+        await pyro_client.download_media(msg, file_name=dest, progress=progress)
+
+    future = asyncio.run_coroutine_threadsafe(_download(), pyro_loop)
+    await asyncio.get_event_loop().run_in_executor(None, future.result)
 
 
 async def process_queue():
@@ -143,26 +148,30 @@ async def run_encode_task(task):
 
     last_ul = [0]
 
-    async def ul_progress(current, total):
-        now = time.time()
-        if now - last_ul[0] < 3:
-            return
-        last_ul[0] = now
-        try:
-            from utils.progress import upload_progress_text
-            await status_msg.edit_text(
-                upload_progress_text(current, total),
-                parse_mode="HTML"
-            )
-        except Exception:
-            pass
+    async def _upload():
+        async def ul_progress(current, total):
+            now = time.time()
+            if now - last_ul[0] < 3:
+                return
+            last_ul[0] = now
+            try:
+                from utils.progress import upload_progress_text
+                await status_msg.edit_text(
+                    upload_progress_text(current, total),
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
 
-    await pyro_client.send_document(
-        chat_id=chat_id,
-        document=output_path,
-        file_name=output_name,
-        progress=ul_progress,
-    )
+        await pyro_client.send_document(
+            chat_id=chat_id,
+            document=output_path,
+            file_name=output_name,
+            progress=ul_progress,
+        )
+
+    future = asyncio.run_coroutine_threadsafe(_upload(), pyro_loop)
+    await asyncio.get_event_loop().run_in_executor(None, future.result)
 
     if os.path.exists(output_path):
         os.remove(output_path)

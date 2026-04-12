@@ -173,12 +173,11 @@ async def run_encode_task(task):
         parse_mode="HTML"
     )
 
-    with open(output_path, "rb") as f:
-        await bot.send_document(
-            chat_id=chat_id,
-            document=f,
-            filename=output_name,
-        )
+    from aiogram.types import FSInputFile
+    await bot.send_document(
+        chat_id=chat_id,
+        document=FSInputFile(output_path, filename=output_name),
+    )
 
     if os.path.exists(output_path):
         os.remove(output_path)

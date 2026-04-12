@@ -47,37 +47,6 @@ def audio_keyboard(streams, selected):
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-async def download_with_progress(chat_id: int, message_id: int, dest: str, file_size: int, status_msg):
-    last_update = [0]
-
-    def progress_callback(current, total):
-        pass
-
-    async def _do_download():
-        nonlocal last_update
-        last_update = [0]
-
-        async def progress(current, total):
-            now = time.time()
-            if now - last_update[0] >= 3:
-                last_update[0] = now
-                try:
-                    await status_msg.edit_text(
-                        download_progress_text(current, total),
-                        parse_mode="HTML"
-                    )
-                except Exception:
-                    pass
-
-        await pyro_client.download_media(
-            f"{chat_id}/{message_id}",
-            file_name=dest,
-            progress=progress,
-        )
-
-    await _do_download()
-
-
 async def pyro_download(chat_id: int, message_id: int, dest: str, file_size: int, status_msg):
     last_update = [0]
 
@@ -121,7 +90,6 @@ async def run_encode_task(task):
     file_name = task["file_name"]
     audio_indices = task["audio_selected"]
     status_msg = task["status_msg"]
-    bot: Bot = task["bot"]
     chat_id = task["chat_id"]
 
     ext = get_extension(file_name)
@@ -173,10 +141,27 @@ async def run_encode_task(task):
         parse_mode="HTML"
     )
 
-    from aiogram.types import FSInputFile
-    await bot.send_document(
+    last_ul = [0]
+
+    async def ul_progress(current, total):
+        now = time.time()
+        if now - last_ul[0] < 3:
+            return
+        last_ul[0] = now
+        try:
+            from utils.progress import upload_progress_text
+            await status_msg.edit_text(
+                upload_progress_text(current, total),
+                parse_mode="HTML"
+            )
+        except Exception:
+            pass
+
+    await pyro_client.send_document(
         chat_id=chat_id,
-        document=FSInputFile(output_path, filename=output_name),
+        document=output_path,
+        file_name=output_name,
+        progress=ul_progress,
     )
 
     if os.path.exists(output_path):

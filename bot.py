@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import threading
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
 from pyrogram import Client
@@ -23,12 +24,29 @@ pyro = Client(
     in_memory=True,
 )
 
+pyro_loop = asyncio.new_event_loop()
+
+
+def run_pyro_loop():
+    asyncio.set_event_loop(pyro_loop)
+    pyro_loop.run_forever()
+
+
+async def pyro_start():
+    await pyro.start()
+
 
 async def main():
-    await pyro.start()
+    pyro_thread = threading.Thread(target=run_pyro_loop, daemon=True)
+    pyro_thread.start()
+
+    future = asyncio.run_coroutine_threadsafe(pyro_start(), pyro_loop)
+    future.result(timeout=30)
+
     encode.pyro_client = pyro
+    encode.pyro_loop = pyro_loop
+
     await dp.start_polling(bot)
-    await pyro.stop()
 
 
 if __name__ == "__main__":

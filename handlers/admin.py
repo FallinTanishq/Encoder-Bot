@@ -9,29 +9,22 @@ from utils.db import (
 
 router = Router()
 
-VALID_SETTINGS = {
-    "crf", "preset", "tune", "aspect",
-    "videocodec", "fps", "audiocodec", "bitrate"
-}
 
-
-def owner_only(handler):
-    async def wrapper(message: Message, *args, **kwargs):
-        if message.from_user.id != OWNER_ID:
-            await message.reply(
-                "<b>Permission denied.</b>\n"
-                "Only the bot owner can use this command.",
-                parse_mode="HTML"
-            )
-            return
-        return await handler(message, *args, **kwargs)
-    wrapper.__name__ = handler.__name__
-    return wrapper
+async def _check_owner(message: Message) -> bool:
+    if message.from_user.id != OWNER_ID:
+        await message.reply(
+            "<b>Permission denied.</b>\n"
+            "Only the bot owner can use this command.",
+            parse_mode="HTML"
+        )
+        return False
+    return True
 
 
 @router.message(Command("approve"))
-@owner_only
 async def cmd_approve(message: Message):
+    if not await _check_owner(message):
+        return
     if message.chat.type == "private":
         await message.reply(
             "<b>This command must be used inside a group.</b>",
@@ -47,8 +40,9 @@ async def cmd_approve(message: Message):
 
 
 @router.message(Command("revoke"))
-@owner_only
 async def cmd_revoke(message: Message):
+    if not await _check_owner(message):
+        return
     if message.chat.type == "private":
         await message.reply(
             "<b>This command must be used inside a group.</b>",
@@ -64,12 +58,7 @@ async def cmd_revoke(message: Message):
 
 
 async def _set_command(message: Message, key: str):
-    if message.from_user.id != OWNER_ID:
-        await message.reply(
-            "<b>Permission denied.</b>\n"
-            "Only the bot owner can change settings.",
-            parse_mode="HTML"
-        )
+    if not await _check_owner(message):
         return
 
     parts = message.text.strip().split(maxsplit=1)

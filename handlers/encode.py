@@ -253,7 +253,7 @@ async def cmd_compress(message: Message, state: FSMContext):
     )
 
 
-@router.callback_query(F.data.startswith("aud:"), EncodeFlow.selecting_audio)
+@router.callback_query(F.data.startswith("aud:"))
 async def cb_toggle_audio(cb: CallbackQuery, state: FSMContext):
     idx = int(cb.data.split(":")[1])
     data = await state.get_data()
@@ -265,7 +265,7 @@ async def cb_toggle_audio(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
 
 
-@router.callback_query(F.data == "aud_done", EncodeFlow.selecting_audio)
+@router.callback_query(F.data == "aud_done")
 async def cb_audio_done(cb: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     audio_selected = data.get("audio_selected", [])
@@ -310,7 +310,7 @@ async def cb_audio_done(cb: CallbackQuery, state: FSMContext):
     await state.set_state(EncodeFlow.confirming)
 
 
-@router.callback_query(F.data == "cancel_encode", EncodeFlow.confirming)
+@router.callback_query(F.data == "cancel_encode")
 async def cb_cancel(cb: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     input_path = data.get("input_path")
@@ -321,7 +321,7 @@ async def cb_cancel(cb: CallbackQuery, state: FSMContext):
     await cb.answer()
 
 
-@router.callback_query(F.data == "start_encode", EncodeFlow.confirming)
+@router.callback_query(F.data == "start_encode")
 async def cb_start_encode(cb: CallbackQuery, state: FSMContext):
     global queue_running
     await cb.answer()

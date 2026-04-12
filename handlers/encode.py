@@ -1,12 +1,10 @@
 import asyncio
 import os
 import time
-import aiohttp
 from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.filters import Command
 from utils.db import is_approved
 from utils.ffprobe import probe, get_streams_by_type, get_duration, get_extension
 from utils.ffmpeg import build_ffmpeg_cmd, run_ffmpeg
@@ -19,6 +17,7 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 
 encode_queue = asyncio.Queue()
 queue_running = False
+pyro_client = None
 
 
 class EncodeFlow(StatesGroup):
@@ -48,28 +47,54 @@ def audio_keyboard(streams, selected):
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-async def download_with_progress(bot: Bot, file_path: str, dest: str, total: int, status_msg):
+async def download_with_progress(chat_id: int, message_id: int, dest: str, file_size: int, status_msg):
     last_update = [0]
-    downloaded = 0
-    chunk_size = 1024 * 512
-    file_url = f"https://api.telegram.org/file/bot{bot.token}/{file_path}"
 
-    async with aiohttp.ClientSession() as session:
-        async with session.get(file_url) as resp:
-            with open(dest, "wb") as f:
-                async for chunk in resp.content.iter_chunked(chunk_size):
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    now = time.time()
-                    if now - last_update[0] >= 3:
-                        last_update[0] = now
-                        try:
-                            await status_msg.edit_text(
-                                download_progress_text(downloaded, total),
-                                parse_mode="HTML"
-                            )
-                        except Exception:
-                            pass
+    def progress_callback(current, total):
+        pass
+
+    async def _do_download():
+        nonlocal last_update
+        last_update = [0]
+
+        async def progress(current, total):
+            now = time.time()
+            if now - last_update[0] >= 3:
+                last_update[0] = now
+                try:
+                    await status_msg.edit_text(
+                        download_progress_text(current, total),
+                        parse_mode="HTML"
+                    )
+                except Exception:
+                    pass
+
+        await pyro_client.download_media(
+            f"{chat_id}/{message_id}",
+            file_name=dest,
+            progress=progress,
+        )
+
+    await _do_download()
+
+
+async def pyro_download(chat_id: int, message_id: int, dest: str, file_size: int, status_msg):
+    last_update = [0]
+
+    async def progress(current, total):
+        now = time.time()
+        if now - last_update[0] >= 3:
+            last_update[0] = now
+            try:
+                await status_msg.edit_text(
+                    download_progress_text(current, total),
+                    parse_mode="HTML"
+                )
+            except Exception:
+                pass
+
+    msg = await pyro_client.get_messages(chat_id, message_id)
+    await pyro_client.download_media(msg, file_name=dest, progress=progress)
 
 
 async def process_queue():
@@ -182,7 +207,6 @@ async def cmd_compress(message: Message, state: FSMContext):
 
     doc = replied.document or replied.video
     file_name = getattr(doc, "file_name", None) or f"input_{doc.file_id}"
-    file_id = doc.file_id
     file_size = doc.file_size or 0
 
     status_msg = await message.reply(
@@ -192,11 +216,16 @@ async def cmd_compress(message: Message, state: FSMContext):
         parse_mode="HTML"
     )
 
-    bot: Bot = message.bot
-    tg_file = await bot.get_file(file_id)
     input_path = os.path.join(TEMP_DIR, file_name)
 
-    await download_with_progress(bot, tg_file.file_path, input_path, file_size, status_msg)
+    try:
+        await pyro_download(message.chat.id, replied.message_id, input_path, file_size, status_msg)
+    except Exception as e:
+        await status_msg.edit_text(
+            f"<b>Download failed.</b>\n<code>{e}</code>",
+            parse_mode="HTML"
+        )
+        return
 
     info = await probe(input_path)
     audio_streams = get_streams_by_type(info, "audio")
@@ -210,7 +239,7 @@ async def cmd_compress(message: Message, state: FSMContext):
     )
 
     if not audio_streams:
-        await _queue_encode(state, status_msg, bot, message.chat.id)
+        await _queue_encode(state, status_msg, message.bot, message.chat.id)
         return
 
     await state.set_state(EncodeFlow.selecting_audio)

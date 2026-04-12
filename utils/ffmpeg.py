@@ -1,9 +1,8 @@
 import asyncio
-import re
 from utils.db import get_settings
 
 
-def build_ffmpeg_cmd(input_path, output_path, audio_indices, subtitle_indices):
+def build_ffmpeg_cmd(input_path, output_path, audio_indices, keep_all_subs=True):
     s = get_settings()
 
     cmd = ["ffmpeg", "-y", "-i", input_path]
@@ -13,8 +12,8 @@ def build_ffmpeg_cmd(input_path, output_path, audio_indices, subtitle_indices):
     for idx in audio_indices:
         cmd += ["-map", f"0:{idx}"]
 
-    for idx in subtitle_indices:
-        cmd += ["-map", f"0:{idx}"]
+    if keep_all_subs:
+        cmd += ["-map", "0:s?"]
 
     cmd += ["-c:v", s["videocodec"]]
     cmd += ["-crf", str(s["crf"])]
@@ -32,7 +31,7 @@ def build_ffmpeg_cmd(input_path, output_path, audio_indices, subtitle_indices):
     cmd += ["-c:a", s["audiocodec"]]
     cmd += ["-b:a", s["bitrate"]]
 
-    if subtitle_indices:
+    if keep_all_subs:
         cmd += ["-c:s", "copy"]
 
     cmd += ["-progress", "pipe:1", "-nostats"]

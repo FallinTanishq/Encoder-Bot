@@ -31,6 +31,15 @@ async def cmd_start(message: Message):
     )
 
 
+@router.message(Command("ping"))
+async def cmd_ping(message: Message):
+    import time
+    start = time.time()
+    sent = await message.reply("<b>Pong!</b>", parse_mode="HTML")
+    elapsed = (time.time() - start) * 1000
+    await sent.edit_text(f"<b>Pong!</b>  <code>{elapsed:.0f}ms</code>", parse_mode="HTML")
+    
+
 @router.message(Command("restart"))
 async def cmd_restart(message: Message):
     if not await _check_owner(message):

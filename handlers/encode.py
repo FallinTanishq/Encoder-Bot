@@ -1,13 +1,14 @@
 import asyncio
 import os
 import time
+import aiohttp
 from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.filters import Command
 from utils.db import is_approved
-from utils.ffprobe import probe, get_streams_by_type, stream_label, get_duration, get_extension
+from utils.ffprobe import probe, get_streams_by_type, get_duration, get_extension
 from utils.ffmpeg import build_ffmpeg_cmd, run_ffmpeg
 from utils.progress import encode_progress_text, download_progress_text
 
@@ -51,10 +52,8 @@ async def download_with_progress(bot: Bot, file_path: str, dest: str, total: int
     last_update = [0]
     downloaded = 0
     chunk_size = 1024 * 512
-
     file_url = f"https://api.telegram.org/file/bot{bot.token}/{file_path}"
 
-    import aiohttp
     async with aiohttp.ClientSession() as session:
         async with session.get(file_url) as resp:
             with open(dest, "wb") as f:
@@ -166,7 +165,7 @@ async def run_encode_task(task):
     )
 
 
-@router.message(Command("compress"))
+@router.message(F.text & F.text.startswith("/compress"))
 async def cmd_compress(message: Message, state: FSMContext):
     if message.chat.type == "private":
         return
@@ -208,7 +207,6 @@ async def cmd_compress(message: Message, state: FSMContext):
         audio_streams=audio_streams,
         audio_selected=[],
         chat_id=message.chat.id,
-        status_msg_id=status_msg.message_id,
     )
 
     if not audio_streams:

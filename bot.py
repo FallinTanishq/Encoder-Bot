@@ -40,6 +40,8 @@ async def main():
     while not pyro.is_connected:
         await asyncio.sleep(0.5)
 
+    logging.info("Pyrogram connected")
+
     encode.pyro_client = pyro
     encode.pyro_loop = pyro_loop
 

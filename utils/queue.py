@@ -62,7 +62,8 @@ async def _run_job(job, bot, status_msg):
     settings = job["settings"]
     selected_audio = job["selected_audio"]
     subtitle_indices = job["subtitle_indices"]
-    source_message = job["source_message"]
+    file_id = job["file_id"]              # file_id string — works with Pyrogram directly
+    source_msg_id = job["source_msg_id"]  # int — used for reply_to_message_id in upload
 
     async def edit(text):
         try:
@@ -94,8 +95,9 @@ async def _run_job(job, bot, status_msg):
 
     async def do_download():
         try:
+            # Pass file_id string — Pyrogram accepts this natively, no aiogram Message needed
             await pyro_client.download_media(
-                source_message,
+                file_id,
                 file_name=input_path,
                 progress=progress_dl,
             )
@@ -182,7 +184,7 @@ async def _run_job(job, bot, status_msg):
                 chat_id=chat_id,
                 document=output_path,
                 progress=progress_ul,
-                reply_to_message_id=source_message.id,
+                reply_to_message_id=source_msg_id,  # int, not a Message object
             )
         except Exception as e:
             upload_error[0] = e
@@ -201,3 +203,4 @@ async def _run_job(job, bot, status_msg):
         raise upload_error[0]
 
     await edit("<b>done.</b>")
+    

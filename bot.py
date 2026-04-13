@@ -3,6 +3,7 @@ import logging
 
 from aiogram import Bot, Dispatcher
 from aiogram.enums import ParseMode
+from aiogram.client.default import DefaultBotProperties
 
 from config import BOT_TOKEN
 from handlers import common, admin, compress
@@ -13,18 +14,31 @@ logging.basicConfig(level=logging.INFO)
 
 
 async def main():
-    bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
+    # ✅ Correct for aiogram v3.7+
+    bot = Bot(
+        token=BOT_TOKEN,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+    )
+
     dp = Dispatcher()
 
+    # Routers
     dp.include_router(common.router)
     dp.include_router(admin.router)
     dp.include_router(compress.router)
 
-    encode_queue.set_aiogram_loop(asyncio.get_event_loop())
+    # ✅ Use running loop (Python 3.12 safe)
+    encode_queue.set_aiogram_loop(asyncio.get_running_loop())
 
+    # Start polling
     await dp.start_polling(bot)
 
 
 if __name__ == "__main__":
+    # ✅ Start Pyrogram once (important)
     start_pyrogram()
-    asyncio.run(main())
+
+    try:
+        asyncio.run(main())
+    except (KeyboardInterrupt, SystemExit):
+        logging.info("Bot stopped.")

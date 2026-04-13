@@ -43,6 +43,14 @@ def _build_audio_keyboard(session_id, audio_tracks, selected):
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
+def _get_file_id(replied: Message) -> str | None:
+    """Extract file_id string from an aiogram Message for use with Pyrogram."""
+    doc = replied.document or replied.video or replied.audio
+    if doc:
+        return doc.file_id
+    return None
+
+
 @router.message(Command("compress"))
 async def cmd_compress(msg: Message):
     if not _is_approved(msg.chat.id):
@@ -58,6 +66,7 @@ async def cmd_compress(msg: Message):
         await msg.answer("<b>replied message has no supported file.</b>", parse_mode="HTML")
         return
 
+    file_id = doc.file_id  # string — works with both aiogram and pyrogram
     file_name = getattr(doc, "file_name", None) or "file"
     ext = os.path.splitext(file_name)[1] or ".mkv"
 
@@ -77,7 +86,8 @@ async def cmd_compress(msg: Message):
         result = [None]
 
         async def fetch_and_probe():
-            path = await pyro_client.download_media(replied, file_name=tmp_in)
+            # Pass file_id string — Pyrogram accepts this directly
+            path = await pyro_client.download_media(file_id, file_name=tmp_in)
             audio_tracks, subtitle_tracks = probe_tracks(path)
             result[0] = (audio_tracks, subtitle_tracks, path)
             done_evt.set()
@@ -115,7 +125,8 @@ async def cmd_compress(msg: Message):
         "input_path": actual_path,
         "output_path": tmp_out,
         "ext": ext,
-        "source_message": replied,
+        "file_id": file_id,          # store file_id string instead of Message object
+        "source_msg_id": replied.message_id,  # for reply_to_message_id in upload
         "chat_id": msg.chat.id,
         "user_id": msg.from_user.id,
     }
@@ -211,7 +222,8 @@ async def cb_encode_start(cb: CallbackQuery):
         "settings": get_settings(),
         "selected_audio": session["selected_audio"],
         "subtitle_indices": session["subtitle_indices"],
-        "source_message": session["source_message"],
+        "file_id": session["file_id"],              # file_id string for pyrogram download
+        "source_msg_id": session["source_msg_id"],  # for reply_to in upload
     }
 
     status_msg = await cb.message.answer("<b>starting...</b>", parse_mode="HTML")

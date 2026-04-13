@@ -18,6 +18,7 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 encode_queue = asyncio.Queue()
 queue_running = False
 pyro_client = None
+pyro_loop = None
 
 
 class EncodeFlow(StatesGroup):
@@ -47,48 +48,53 @@ def audio_keyboard(streams, selected):
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
+def _schedule_edit(main_loop, status_msg, text):
+    asyncio.run_coroutine_threadsafe(
+        status_msg.edit_text(text, parse_mode="HTML"),
+        main_loop
+    )
+
+
 async def pyro_download(chat_id: int, message_id: int, dest: str, status_msg):
+    main_loop = asyncio.get_event_loop()
     last_update = [0]
 
-    async def progress(current, total):
+    def progress(current, total):
         now = time.time()
         if now - last_update[0] < 3:
             return
         last_update[0] = now
-        try:
-            await status_msg.edit_text(
-                download_progress_text(current, total),
-                parse_mode="HTML"
-            )
-        except Exception:
-            pass
+        _schedule_edit(main_loop, status_msg, download_progress_text(current, total))
 
-    msg = await pyro_client.get_messages(chat_id, message_id)
-    await pyro_client.download_media(msg, file_name=dest, progress=progress)
+    async def _run():
+        msg = await pyro_client.get_messages(chat_id, message_id)
+        await pyro_client.download_media(msg, file_name=dest, progress=progress)
+
+    fut = asyncio.run_coroutine_threadsafe(_run(), pyro_loop)
+    await asyncio.get_event_loop().run_in_executor(None, fut.result)
 
 
 async def pyro_upload(chat_id: int, output_path: str, output_name: str, status_msg):
+    main_loop = asyncio.get_event_loop()
     last_update = [0]
 
-    async def progress(current, total):
+    def progress(current, total):
         now = time.time()
         if now - last_update[0] < 3:
             return
         last_update[0] = now
-        try:
-            await status_msg.edit_text(
-                upload_progress_text(current, total),
-                parse_mode="HTML"
-            )
-        except Exception:
-            pass
+        _schedule_edit(main_loop, status_msg, upload_progress_text(current, total))
 
-    await pyro_client.send_document(
-        chat_id=chat_id,
-        document=output_path,
-        file_name=output_name,
-        progress=progress,
-    )
+    async def _run():
+        await pyro_client.send_document(
+            chat_id=chat_id,
+            document=output_path,
+            file_name=output_name,
+            progress=progress,
+        )
+
+    fut = asyncio.run_coroutine_threadsafe(_run(), pyro_loop)
+    await asyncio.get_event_loop().run_in_executor(None, fut.result)
 
 
 async def process_queue():
@@ -202,7 +208,6 @@ async def cmd_compress(message: Message, state: FSMContext):
 
     doc = replied.document or replied.video
     file_name = getattr(doc, "file_name", None) or f"input_{doc.file_id}"
-    file_size = doc.file_size or 0
 
     status_msg = await message.reply(
         "<b>ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ</b>\n\n"

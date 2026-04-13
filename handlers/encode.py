@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import os
 import time
 from aiogram import Router, F, Bot
@@ -11,6 +12,7 @@ from utils.ffmpeg import build_ffmpeg_cmd, run_ffmpeg
 from utils.progress import encode_progress_text, download_progress_text, upload_progress_text
 
 router = Router()
+log = logging.getLogger(__name__)
 
 TEMP_DIR = "temp"
 os.makedirs(TEMP_DIR, exist_ok=True)
@@ -48,53 +50,93 @@ def audio_keyboard(streams, selected):
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def _schedule_edit(main_loop, status_msg, text):
-    asyncio.run_coroutine_threadsafe(
-        status_msg.edit_text(text, parse_mode="HTML"),
-        main_loop
-    )
+def _safe_edit(main_loop, status_msg, text):
+    try:
+        asyncio.run_coroutine_threadsafe(
+            status_msg.edit_text(text, parse_mode="HTML"),
+            main_loop
+        )
+    except Exception as e:
+        log.warning(f"Progress edit failed: {e}")
 
 
 async def pyro_download(chat_id: int, message_id: int, dest: str, status_msg):
     main_loop = asyncio.get_event_loop()
     last_update = [0]
 
+    log.info(f"Starting download: chat={chat_id} msg={message_id} dest={dest}")
+
+    done = threading.Event()
+    error_box = [None]
+
     def progress(current, total):
         now = time.time()
         if now - last_update[0] < 3:
             return
         last_update[0] = now
-        _schedule_edit(main_loop, status_msg, download_progress_text(current, total))
+        log.info(f"Download progress: {current}/{total}")
+        _safe_edit(main_loop, status_msg, download_progress_text(current, total))
 
     async def _run():
-        msg = await pyro_client.get_messages(chat_id, message_id)
-        await pyro_client.download_media(msg, file_name=dest, progress=progress)
+        try:
+            log.info("Fetching message from Pyrogram...")
+            msg = await pyro_client.get_messages(chat_id, message_id)
+            log.info(f"Got message, media={msg.media}, downloading...")
+            await pyro_client.download_media(msg, file_name=dest, progress=progress)
+            log.info("Download complete")
+        except Exception as e:
+            log.error(f"Download error: {e}")
+            error_box[0] = e
+        finally:
+            done.set()
 
-    fut = asyncio.run_coroutine_threadsafe(_run(), pyro_loop)
-    await asyncio.get_event_loop().run_in_executor(None, fut.result)
+    asyncio.run_coroutine_threadsafe(_run(), pyro_loop)
+
+    await asyncio.get_event_loop().run_in_executor(None, done.wait)
+
+    if error_box[0]:
+        raise error_box[0]
 
 
 async def pyro_upload(chat_id: int, output_path: str, output_name: str, status_msg):
     main_loop = asyncio.get_event_loop()
     last_update = [0]
 
+    log.info(f"Starting upload: {output_path} -> chat={chat_id}")
+
+    done = threading.Event()
+    error_box = [None]
+
     def progress(current, total):
         now = time.time()
         if now - last_update[0] < 3:
             return
         last_update[0] = now
-        _schedule_edit(main_loop, status_msg, upload_progress_text(current, total))
+        log.info(f"Upload progress: {current}/{total}")
+        _safe_edit(main_loop, status_msg, upload_progress_text(current, total))
 
     async def _run():
-        await pyro_client.send_document(
-            chat_id=chat_id,
-            document=output_path,
-            file_name=output_name,
-            progress=progress,
-        )
+        try:
+            log.info("Sending document via Pyrogram...")
+            await pyro_client.send_document(
+                chat_id=chat_id,
+                document=output_path,
+                file_name=output_name,
+                progress=progress,
+            )
+            log.info("Upload complete")
+        except Exception as e:
+            log.error(f"Upload error: {e}")
+            error_box[0] = e
+        finally:
+            done.set()
 
-    fut = asyncio.run_coroutine_threadsafe(_run(), pyro_loop)
-    await asyncio.get_event_loop().run_in_executor(None, fut.result)
+    asyncio.run_coroutine_threadsafe(_run(), pyro_loop)
+
+    await asyncio.get_event_loop().run_in_executor(None, done.wait)
+
+    if error_box[0]:
+        raise error_box[0]
 
 
 async def process_queue():
@@ -105,6 +147,7 @@ async def process_queue():
         try:
             await run_encode_task(task)
         except Exception as e:
+            log.error(f"Task failed: {e}")
             try:
                 await task["status_msg"].edit_text(
                     f"<b>Encoding failed.</b>\n<code>{e}</code>",

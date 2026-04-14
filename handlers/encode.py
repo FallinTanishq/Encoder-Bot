@@ -12,8 +12,11 @@ from utils.progress import update_progress
 
 @Client.on_message(filters.command("compress"))
 async def compress_cmd(client, message):
-    if message.chat.id not in get_groups() and message.chat.id != OWNER_ID:
+    # Fetch authorized groups from MongoDB
+    auth_groups = await get_groups()
+    if message.chat.id not in auth_groups and message.chat.id != OWNER_ID:
         return
+        
     if not message.reply_to_message or not message.reply_to_message.media:
         await message.reply_text("<b>ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴍᴇᴅɪᴀ ᴍᴇssᴀɢᴇ.</b>")
         return
@@ -41,7 +44,7 @@ async def compress_cmd(client, message):
         os.makedirs("downloads", exist_ok=True)
         temp_header = f"downloads/header_{task_id}.mkv"
         
-        # FAST PROBE: Download only the first 5MB for metadata
+        # FAST PROBE: Stream only the first 5MB to get audio tracks
         async for chunk in client.stream_media(message.reply_to_message, limit=5):
             with open(temp_header, "ab") as f:
                 f.write(chunk)
@@ -60,7 +63,7 @@ async def compress_cmd(client, message):
         utils.state.pending_selections[task_id]["audio_streams"] = audio_streams
         
         if not audio_streams:
-            # If no audio or probe failed, bypass selection and trigger download directly
+            # If no audio tracks are found, skip selection and download immediately
             await trigger_full_download(task_id, client)
             return
             
@@ -123,11 +126,11 @@ async def finish_selection(client, query):
         return
     await query.answer()
     
-    # Trigger full download
+    # Send the task to be downloaded and encoded
     asyncio.create_task(trigger_full_download(task_id, client))
 
 async def trigger_full_download(task_id, client):
-    """Downloads the full file after selections are made."""
+    """Downloads the full file and adds it to the queue."""
     if task_id not in utils.state.pending_selections:
         return
         
@@ -168,6 +171,7 @@ async def cancel_task(client, query):
     if query.from_user.id not in allowed:
         await query.answer("Not allowed.", show_alert=True)
         return
+    
     utils.state.cancel_flags[task_id] = True
     if utils.state.active_process and getattr(utils.state, "current_task_id", None) == task_id:
         try:

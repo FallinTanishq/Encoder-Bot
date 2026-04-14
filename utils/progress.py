@@ -1,6 +1,6 @@
 import time
+from pyrogram import StopTransmission
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from pyrogram.errors import StopTransmission
 import utils.state
 
 def format_time(seconds):

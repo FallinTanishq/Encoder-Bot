@@ -3,7 +3,7 @@ import os
 import time
 from pyrogram import Client, idle, enums
 import config
-from utils.db import get_settings, init_db, get_thumb # <--- ADDED get_thumb
+from utils.db import get_settings, init_db, get_thumb
 import utils.state
 from utils.ffmpeg_utils import run_ffmpeg, take_screenshot
 from utils.progress import update_progress
@@ -18,6 +18,7 @@ app = Client(
 )
 
 def cleanup_downloads():
+    """Cleans up the downloads folder on startup."""
     folder = 'downloads'
     os.makedirs(folder, exist_ok=True)
     for filename in os.listdir(folder):
@@ -25,10 +26,11 @@ def cleanup_downloads():
         try:
             if os.path.isfile(file_path):
                 os.remove(file_path)
-        except Exception as e:
+        except Exception:
             pass
 
 async def worker():
+    """Background worker that processes the video queue."""
     while True:
         task_id = await utils.state.queue.get()
         utils.state.current_task_id = task_id
@@ -44,7 +46,7 @@ async def worker():
 
         try:
             msg = data["msg"]
-            user_id = data["user_id"] # Get the user ID who started the task
+            user_id = data["user_id"]
             file_path = data["file_path"]
             ext = os.path.splitext(file_path)[1]
             out_path = f"{file_path}_out{ext}"
@@ -52,6 +54,7 @@ async def worker():
             await msg.edit_text("<b>ᴘʀᴇᴘᴀʀɪɴɢ ᴇɴᴄᴏᴅᴇ...</b>")
             settings = await get_settings() 
             
+            # Start FFmpeg Process
             success = await run_ffmpeg(
                 file_path, out_path, data["selected"], 
                 settings, msg, task_id, data["duration"]
@@ -61,23 +64,24 @@ async def worker():
                 raise Exception("Cancelled")
 
             if success and os.path.exists(out_path):
-                # --- CHECK FOR CUSTOM THUMBNAIL ---
+                # --- THUMBNAIL LOGIC ---
                 custom_thumb_id = await get_thumb(user_id)
                 
                 if custom_thumb_id:
-                    # Download their custom thumbnail from Telegram servers
+                    # Download the user's saved thumbnail from Telegram
                     thumb_dl_path = f"downloads/custom_{task_id}.jpg"
                     final_thumb = await app.download_media(custom_thumb_id, file_name=thumb_dl_path)
                 else:
-                    # Generate one automatically if no custom thumb is saved
-                    thumb_dl_path = f"downloads/thumb_{task_id}.jpg"
-                    final_thumb = take_screenshot(out_path, thumb_dl_path)
+                    # Fallback: Generate a screenshot from the output video
+                    gen_path = f"downloads/thumb_{task_id}.jpg"
+                    final_thumb = take_screenshot(out_path, gen_path)
                 
+                # Upload the final file
                 start_time = time.time()
                 await app.send_document(
                     chat_id=data["message"].chat.id,
                     document=out_path,
-                    thumb=final_thumb, # Use whichever thumbnail was generated/downloaded
+                    thumb=final_thumb,
                     caption="<b>✅ ᴇɴᴄᴏᴅᴇᴅ sᴜᴄᴄᴇssғᴜʟʟʏ</b>",
                     reply_to_message_id=data["message"].id,
                     progress=update_progress,
@@ -94,12 +98,11 @@ async def worker():
                 except:
                     pass
         finally:
-            paths_to_delete = []
+            # Cleanup all temporary files for this task
+            paths_to_delete = [final_thumb]
             if data and "file_path" in data:
                 paths_to_delete.append(data["file_path"])
                 paths_to_delete.append(f"{data['file_path']}_out{ext}")
-            if final_thumb:
-                paths_to_delete.append(final_thumb)
                 
             for p in paths_to_delete:
                 if p and os.path.exists(p):
@@ -113,10 +116,12 @@ async def worker():
             utils.state.queue.task_done()
 
 async def main():
+    """Main entry point."""
     cleanup_downloads()
-    await init_db() 
+    await init_db() # Connect to MongoDB
     await app.start()
     asyncio.create_task(worker())
+    print("Bot is running...")
     await idle()
     await app.stop()
 

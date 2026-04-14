@@ -148,6 +148,14 @@ def register(app: Client):
             save_groups(groups)
         await message.reply_text(f"<b>Group revoked:</b> <code>{chat_id}</code>", parse_mode="html")
 
+    @app.on_message(filters.command("approve"))
+    async def approve_denied(client, message: Message):
+        pass
+
+    @app.on_message(filters.command("revoke"))
+    async def revoke_denied(client, message: Message):
+        pass
+
     @app.on_message(filters.command("savepreset") & filters.user(OWNER_ID))
     async def savepreset_cmd(client, message: Message):
         parts = message.text.split(None, 1)

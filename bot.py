@@ -5,7 +5,7 @@ from pyrogram import Client, idle, enums
 import config
 from utils.db import get_settings
 import utils.state
-from utils.ffmpeg_utils import run_ffmpeg
+from utils.ffmpeg_utils import run_ffmpeg, take_screenshot
 from utils.progress import update_progress
 
 app = Client(
@@ -17,12 +17,26 @@ app = Client(
     parse_mode=enums.ParseMode.HTML
 )
 
+def cleanup_downloads():
+    """Wipes the downloads directory on startup to prevent Heroku space leaks."""
+    folder = 'downloads'
+    os.makedirs(folder, exist_ok=True)
+    for filename in os.listdir(folder):
+        file_path = os.path.join(folder, filename)
+        try:
+            if os.path.isfile(file_path):
+                os.remove(file_path)
+        except Exception as e:
+            print(f"Cleanup Error: {e}")
+
 async def worker():
     while True:
         task_id = await utils.state.queue.get()
         utils.state.current_task_id = task_id
         data = utils.state.active_tasks.get(task_id)
+        
         ext = ""
+        screenshot = None
 
         if not data or utils.state.cancel_flags.get(task_id):
             utils.state.active_tasks.pop(task_id, None)
@@ -51,15 +65,21 @@ async def worker():
                 raise Exception("Cancelled")
 
             if success and os.path.exists(out_path):
+                # Generate Thumbnail
+                thumb_path = f"downloads/thumb_{task_id}.jpg"
+                screenshot = take_screenshot(out_path, thumb_path)
+                
                 start_time = time.time()
                 await app.send_document(
                     chat_id=data["message"].chat.id,
                     document=out_path,
+                    thumb=screenshot,  # Attach auto-generated thumbnail
+                    caption="<b>✅ ᴇɴᴄᴏᴅᴇᴅ sᴜᴄᴄᴇssғᴜʟʟʏ</b>",
                     reply_to_message_id=data["message"].id,
                     progress=update_progress,
                     progress_args=(msg, start_time, "ᴜᴘʟᴏᴀᴅɪɴɢ", task_id)
                 )
-                await msg.edit_text("<b>ᴄᴏᴍᴘʟᴇᴛᴇᴅ.</b>")
+                await msg.delete()
             else:
                 await msg.edit_text("<b>ᴇɴᴄᴏᴅɪɴɢ ғᴀɪʟᴇᴅ.</b>")
                 
@@ -70,22 +90,27 @@ async def worker():
                 except:
                     pass
         finally:
-            # Full cleanup of files
+            # Full cleanup of ALL files related to this task
+            paths_to_delete = []
             if data and "file_path" in data:
-                in_p = data["file_path"]
-                out_p = f"{in_p}_out{ext}"
-                for p in [in_p, out_p]:
-                    if p and os.path.exists(p):
-                        try:
-                            os.remove(p)
-                        except:
-                            pass
+                paths_to_delete.append(data["file_path"])
+                paths_to_delete.append(f"{data['file_path']}_out{ext}")
+            if screenshot:
+                paths_to_delete.append(screenshot)
+                
+            for p in paths_to_delete:
+                if p and os.path.exists(p):
+                    try:
+                        os.remove(p)
+                    except:
+                        pass
             
             utils.state.current_task_id = None
             utils.state.active_tasks.pop(task_id, None)
             utils.state.queue.task_done()
 
 async def main():
+    cleanup_downloads()
     await app.start()
     asyncio.create_task(worker())
     await idle()

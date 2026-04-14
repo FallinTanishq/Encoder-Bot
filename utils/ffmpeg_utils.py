@@ -34,9 +34,15 @@ async def run_ffmpeg(input_file, output_file, audio_tracks, settings, msg, task_
     cmd.extend(["-c:s", "copy"])
     cmd.append(output_file)
 
-    utils.state.active_process = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-    start_time = time.time()
+    # We set a higher limit for the internal buffer to prevent the "chunk exceed" error
+    utils.state.active_process = await asyncio.create_subprocess_exec(
+        *cmd, 
+        stdout=asyncio.subprocess.PIPE, 
+        stderr=asyncio.subprocess.PIPE,
+        limit=1024 * 128 # 128KB buffer
+    )
     
+    start_time = time.time()
     time_regex = re.compile(r"time=\s*(\d+):(\d+):([\d\.]+)")
     speed_regex = re.compile(r"speed=\s*([\d\.]+)x")
     fps_regex = re.compile(r"fps=\s*([\d\.]+)")
@@ -48,10 +54,15 @@ async def run_ffmpeg(input_file, output_file, audio_tracks, settings, msg, task_
             utils.state.active_process = None
             return False
 
-        line = await utils.state.active_process.stderr.readline()
-        if not line:
+        try:
+            # We use readuntil to find the carriage return \r or newline \n FFmpeg uses for progress
+            line_bytes = await utils.state.active_process.stderr.readuntil(b'\r')
+            line = line_bytes.decode("utf-8").strip()
+        except asyncio.IncompleteReadError as e:
+            line = e.partial.decode("utf-8").strip()
+            if not line: break
+        except Exception:
             break
-        line = line.decode("utf-8").strip()
 
         time_match = time_regex.search(line)
         speed_match = speed_regex.search(line)

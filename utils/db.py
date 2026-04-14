@@ -1,41 +1,59 @@
-import json
-import os
+import motor.motor_asyncio
+import config
 
-os.makedirs("data", exist_ok=True)
+# Initialize MongoDB Client
+client = motor.motor_asyncio.AsyncIOMotorClient(config.MONGO_URI)
+db = client["EncoderBotDB"]
+settings_col = db["settings"]
+groups_col = db["groups"]
 
-def _read(filepath, default):
-    if not os.path.exists(filepath):
-        return default
-    with open(filepath, "r", encoding="utf-8") as f:
-        return json.load(f)
+DEFAULT_SETTINGS = {
+    "_id": "default",
+    "videocodec": "libx264",
+    "crf": "none",
+    "preset": "none",
+    "tune": "none",
+    "aspect": "none",
+    "fps": "sameassource",
+    "audiocodec": "aac",
+    "bitrate": "none"
+}
 
-def _write(filepath, data):
-    with open(filepath, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=4)
+async def init_db():
+    """Run this on startup to ensure default settings exist."""
+    doc = await settings_col.find_one({"_id": "default"})
+    if not doc:
+        await settings_col.insert_one(DEFAULT_SETTINGS)
 
-def get_settings():
-    return _read("data/settings.json", {
-        "crf": "27",
-        "preset": "veryfast",
-        "tune": "none",
-        "aspect": "none",
-        "videocodec": "libx264",
-        "fps": "sameassource",
-        "audiocodec": "libopus",
-        "bitrate": "64k"
-    })
+async def get_settings():
+    """Fetches the current FFmpeg settings from MongoDB."""
+    doc = await settings_col.find_one({"_id": "default"})
+    return doc if doc else DEFAULT_SETTINGS
 
-def save_settings(data):
-    _write("data/settings.json", data)
+async def update_setting(key, value):
+    """Updates a specific setting in MongoDB."""
+    await settings_col.update_one(
+        {"_id": "default"},
+        {"$set": {key: value}},
+        upsert=True
+    )
 
-def get_groups():
-    return _read("data/groups.json", [])
+async def get_groups():
+    """Returns a list of authorized group IDs."""
+    cursor = groups_col.find({})
+    groups = []
+    async for doc in cursor:
+        groups.append(doc["chat_id"])
+    return groups
 
-def save_groups(data):
-    _write("data/groups.json", data)
+async def add_group(chat_id):
+    """Authorizes a new group."""
+    await groups_col.update_one(
+        {"chat_id": chat_id}, 
+        {"$set": {"chat_id": chat_id}}, 
+        upsert=True
+    )
 
-def get_presets():
-    return _read("data/presets.json", {})
-
-def save_presets(data):
-    _write("data/presets.json", data)
+async def remove_group(chat_id):
+    """Removes authorization from a group."""
+    await groups_col.delete_one({"chat_id": chat_id})

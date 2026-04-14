@@ -56,22 +56,22 @@ async def check_settings(client, message):
             text += f"• <b>{key}:</b> <code>{val}</code>\n"
     await message.reply_text(text)
 
-@Client.on_message(filters.command("addgroup") & filters.user(OWNER_ID))
+@Client.on_message(filters.command(["addgroup", "approve"]) & filters.user(OWNER_ID))
 async def cmd_addgroup(client, message):
     if len(message.command) < 2:
-        # If no ID is passed, add the current group
+        # If no ID is passed, use the current chat's ID
         chat_id = message.chat.id
     else:
         try:
             chat_id = int(message.command[1])
         except ValueError:
-            await message.reply_text("Invalid Chat ID.")
+            await message.reply_text("<b>Invalid Chat ID. Please provide a number.</b>")
             return
 
     await add_group(chat_id)
-    await message.reply_text(f"✅ <b>Group</b> <code>{chat_id}</code> <b>has been authorized.</b>")
+    await message.reply_text(f"✅ <b>Chat authorized!</b>\n<b>ID:</b> <code>{chat_id}</code>")
 
-@Client.on_message(filters.command("rmgroup") & filters.user(OWNER_ID))
+@Client.on_message(filters.command(["rmgroup", "revoke", "unapprove"]) & filters.user(OWNER_ID))
 async def cmd_rmgroup(client, message):
     if len(message.command) < 2:
         chat_id = message.chat.id
@@ -79,11 +79,11 @@ async def cmd_rmgroup(client, message):
         try:
             chat_id = int(message.command[1])
         except ValueError:
-            await message.reply_text("Invalid Chat ID.")
+            await message.reply_text("<b>Invalid Chat ID.</b>")
             return
 
     await remove_group(chat_id)
-    await message.reply_text(f"❌ <b>Group</b> <code>{chat_id}</code> <b>authorization removed.</b>")
+    await message.reply_text(f"❌ <b>Authorization removed for:</b> <code>{chat_id}</code>")
 
 @Client.on_message(filters.command("groups") & filters.user(OWNER_ID))
 async def list_groups(client, message):

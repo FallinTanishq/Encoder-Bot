@@ -23,7 +23,7 @@ async def compress_cmd(client, message):
         return
 
     task_id = str(uuid.uuid4())
-    msg = await message.reply_text("<b>ᴘʀᴏᴄᴇssɪɴɢ...</b>")
+    msg = await message.reply_text("<b>ɢᴇᴛᴛɪɴɢ ᴍᴇᴛᴀᴅᴀᴛᴀ... ⚡</b>")
     
     utils.state.pending_selections[task_id] = {
         "client": client,
@@ -36,21 +36,22 @@ async def compress_cmd(client, message):
     
     try:
         utils.state.cancel_flags[task_id] = False
-        start_time = time.time()
-        file_path = await client.download_media(
-            media,
-            progress=update_progress,
-            progress_args=(msg, start_time, "ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ", task_id)
-        )
         
-        if utils.state.cancel_flags.get(task_id):
-            if os.path.exists(file_path):
-                os.remove(file_path)
-            await msg.edit_text("<b>ᴄᴀɴᴄᴇʟʟᴇᴅ.</b>")
-            return
+        # Ensure downloads folder exists
+        os.makedirs("downloads", exist_ok=True)
+        temp_header = f"downloads/header_{task_id}.mkv"
+        
+        # FAST PROBE: Download only the first 5MB for metadata
+        async for chunk in client.stream_media(message.reply_to_message, limit=5):
+            with open(temp_header, "ab") as f:
+                f.write(chunk)
+            if os.path.getsize(temp_header) > 5 * 1024 * 1024: 
+                break
+        
+        probe_data = await probe(temp_header)
+        if os.path.exists(temp_header):
+            os.remove(temp_header) 
             
-        utils.state.pending_selections[task_id]["file_path"] = file_path
-        probe_data = await probe(file_path)
         streams = probe_data.get("streams", [])
         duration = float(probe_data.get("format", {}).get("duration", 0))
         utils.state.pending_selections[task_id]["duration"] = duration
@@ -59,7 +60,8 @@ async def compress_cmd(client, message):
         utils.state.pending_selections[task_id]["audio_streams"] = audio_streams
         
         if not audio_streams:
-            await start_queue_task(task_id)
+            # If no audio or probe failed, bypass selection and trigger download directly
+            await trigger_full_download(task_id, client)
             return
             
         kb = []
@@ -120,7 +122,40 @@ async def finish_selection(client, query):
         await query.answer("Not yours.", show_alert=True)
         return
     await query.answer()
-    await start_queue_task(task_id)
+    
+    # Trigger full download
+    asyncio.create_task(trigger_full_download(task_id, client))
+
+async def trigger_full_download(task_id, client):
+    """Downloads the full file after selections are made."""
+    if task_id not in utils.state.pending_selections:
+        return
+        
+    data = utils.state.pending_selections[task_id]
+    msg = data["msg"]
+    media_msg = data["media_msg"]
+    
+    try:
+        start_time = time.time()
+        file_path = await client.download_media(
+            media_msg,
+            progress=update_progress,
+            progress_args=(msg, start_time, "ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ", task_id)
+        )
+        
+        if utils.state.cancel_flags.get(task_id):
+            if file_path and os.path.exists(file_path):
+                os.remove(file_path)
+            await msg.edit_text("<b>ᴄᴀɴᴄᴇʟʟᴇᴅ.</b>")
+            utils.state.pending_selections.pop(task_id, None)
+            return
+            
+        data["file_path"] = file_path
+        await start_queue_task(task_id)
+        
+    except Exception as e:
+        await msg.edit_text(f"<b>Download Error:</b> <code>{str(e)}</code>")
+        utils.state.pending_selections.pop(task_id, None)
 
 @Client.on_callback_query(filters.regex(r"^cancel_(.*)"))
 async def cancel_task(client, query):

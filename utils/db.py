@@ -1,11 +1,11 @@
 import motor.motor_asyncio
 import config
 
-# Initialize MongoDB Client
 client = motor.motor_asyncio.AsyncIOMotorClient(config.MONGO_URI)
 db = client["EncoderBotDB"]
 settings_col = db["settings"]
 groups_col = db["groups"]
+users_col = db["users"] # NEW: Collection for user-specific data
 
 DEFAULT_SETTINGS = {
     "_id": "default",
@@ -20,26 +20,18 @@ DEFAULT_SETTINGS = {
 }
 
 async def init_db():
-    """Run this on startup to ensure default settings exist."""
     doc = await settings_col.find_one({"_id": "default"})
     if not doc:
         await settings_col.insert_one(DEFAULT_SETTINGS)
 
 async def get_settings():
-    """Fetches the current FFmpeg settings from MongoDB."""
     doc = await settings_col.find_one({"_id": "default"})
     return doc if doc else DEFAULT_SETTINGS
 
 async def update_setting(key, value):
-    """Updates a specific setting in MongoDB."""
-    await settings_col.update_one(
-        {"_id": "default"},
-        {"$set": {key: value}},
-        upsert=True
-    )
+    await settings_col.update_one({"_id": "default"}, {"$set": {key: value}}, upsert=True)
 
 async def get_groups():
-    """Returns a list of authorized group IDs."""
     cursor = groups_col.find({})
     groups = []
     async for doc in cursor:
@@ -47,13 +39,21 @@ async def get_groups():
     return groups
 
 async def add_group(chat_id):
-    """Authorizes a new group."""
-    await groups_col.update_one(
-        {"chat_id": chat_id}, 
-        {"$set": {"chat_id": chat_id}}, 
-        upsert=True
-    )
+    await groups_col.update_one({"chat_id": chat_id}, {"$set": {"chat_id": chat_id}}, upsert=True)
 
 async def remove_group(chat_id):
-    """Removes authorization from a group."""
     await groups_col.delete_one({"chat_id": chat_id})
+
+# --- NEW THUMBNAIL FUNCTIONS ---
+async def set_thumb(user_id, file_id):
+    """Saves a custom thumbnail file_id for a specific user."""
+    await users_col.update_one({"user_id": user_id}, {"$set": {"thumb": file_id}}, upsert=True)
+
+async def get_thumb(user_id):
+    """Fetches a user's custom thumbnail file_id."""
+    doc = await users_col.find_one({"user_id": user_id})
+    return doc.get("thumb") if doc else None
+
+async def del_thumb(user_id):
+    """Deletes a user's custom thumbnail."""
+    await users_col.update_one({"user_id": user_id}, {"$unset": {"thumb": ""}})

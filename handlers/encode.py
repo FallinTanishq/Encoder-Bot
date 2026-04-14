@@ -113,28 +113,6 @@ async def toggle_audio(client, query):
 @Client.on_callback_query(filters.regex(r"^done_(.*)"))
 async def finish_selection(client, query):
     task_id = query.matches[0].group(1)
-    
-    if task_id not in utils.state.pending_selections:
-        await query.answer("Expired.", show_alert=True)
-        return
-    if query.from_user.id != utils.state.pending_selections[task_id]["user_id"] and query.from_user.id != OWNER_ID:
-        await query.answer("Not yours.", show_alert=True)
-        return
-        
-    await query.answer()
-    sel = utils.state.pending_selections[task_id]["selected"]
-    q_pos = utils.state.queue.qsize() + 1
-    
-    text = f"<b>ᴛʀᴀᴄᴋs sᴇʟᴇᴄᴛᴇᴅ:</b> <code>{len(sel)}</code>\n<b>ǫᴜᴇᴜᴇ ᴘᴏsɪᴛɪᴏɴ:</b> <code>{q_pos}</code>"
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("Start Encoding", callback_data=f"start_{task_id}")],
-        [InlineKeyboardButton("Cancel", callback_data=f"cancel_{task_id}")]
-    ])
-    await query.message.edit_text(text, reply_markup=kb)
-
-@Client.on_callback_query(filters.regex(r"^start_(.*)"))
-async def start_encoding_cb(client, query):
-    task_id = query.matches[0].group(1)
     if task_id not in utils.state.pending_selections:
         await query.answer("Expired.", show_alert=True)
         return
@@ -144,34 +122,35 @@ async def start_encoding_cb(client, query):
     await query.answer()
     await start_queue_task(task_id)
 
-async def start_queue_task(task_id):
-    data = utils.state.pending_selections.pop(task_id)
-    msg = data["msg"]
-    await msg.edit_text("<b>ᴀᴅᴅᴇᴅ ᴛᴏ ǫᴜᴇᴜᴇ...</b>", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Cancel", callback_data=f"cancel_{task_id}")]]))
-    utils.state.active_tasks[task_id] = data
-    await utils.state.queue.put(task_id)
-
 @Client.on_callback_query(filters.regex(r"^cancel_(.*)"))
 async def cancel_task(client, query):
     task_id = query.matches[0].group(1)
     allowed = [OWNER_ID]
-    
     if task_id in utils.state.pending_selections:
         allowed.append(utils.state.pending_selections[task_id]["user_id"])
     elif task_id in utils.state.active_tasks:
         allowed.append(utils.state.active_tasks[task_id]["user_id"])
-        
     if query.from_user.id not in allowed:
         await query.answer("Not allowed.", show_alert=True)
         return
-        
     utils.state.cancel_flags[task_id] = True
-    
     if utils.state.active_process and getattr(utils.state, "current_task_id", None) == task_id:
         try:
             utils.state.active_process.terminate()
-        except Exception:
+        except:
             pass
-            
     await query.answer("Cancelled.")
     await query.message.edit_text("<b>ᴄᴀɴᴄᴇʟʟᴇᴅ ʙʏ ᴜsᴇʀ.</b>")
+
+async def start_queue_task(task_id):
+    if task_id not in utils.state.pending_selections:
+        return
+    data = utils.state.pending_selections.pop(task_id)
+    msg = data["msg"]
+    q_pos = utils.state.queue.qsize() + 1
+    utils.state.active_tasks[task_id] = data
+    await utils.state.queue.put(task_id)
+    await msg.edit_text(
+        f"<b>ᴀᴅᴅᴇᴅ ᴛᴏ ǫᴜᴇᴜᴇ</b>\n<b>ᴘᴏsɪᴛɪᴏɴ:</b> <code>{q_pos}</code>",
+        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Cancel", callback_data=f"cancel_{task_id}")]])
+    )

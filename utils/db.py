@@ -1,11 +1,12 @@
 import motor.motor_asyncio
 import config
 
+# Initialize MongoDB Client
 client = motor.motor_asyncio.AsyncIOMotorClient(config.MONGO_URI)
 db = client["EncoderBotDB"]
 settings_col = db["settings"]
 groups_col = db["groups"]
-users_col = db["users"] # NEW: Collection for user-specific data
+users_col = db["users"] 
 
 DEFAULT_SETTINGS = {
     "_id": "default",
@@ -20,18 +21,22 @@ DEFAULT_SETTINGS = {
 }
 
 async def init_db():
+    """Initializes default settings if database is empty."""
     doc = await settings_col.find_one({"_id": "default"})
     if not doc:
         await settings_col.insert_one(DEFAULT_SETTINGS)
 
 async def get_settings():
+    """Fetches global FFmpeg settings."""
     doc = await settings_col.find_one({"_id": "default"})
     return doc if doc else DEFAULT_SETTINGS
 
 async def update_setting(key, value):
+    """Updates a specific global setting."""
     await settings_col.update_one({"_id": "default"}, {"$set": {key: value}}, upsert=True)
 
 async def get_groups():
+    """Returns list of authorized chat IDs."""
     cursor = groups_col.find({})
     groups = []
     async for doc in cursor:
@@ -44,13 +49,14 @@ async def add_group(chat_id):
 async def remove_group(chat_id):
     await groups_col.delete_one({"chat_id": chat_id})
 
-# --- NEW THUMBNAIL FUNCTIONS ---
+# --- USER THUMBNAIL FUNCTIONS ---
+
 async def set_thumb(user_id, file_id):
-    """Saves a custom thumbnail file_id for a specific user."""
+    """Saves a user's custom thumbnail file_id."""
     await users_col.update_one({"user_id": user_id}, {"$set": {"thumb": file_id}}, upsert=True)
 
 async def get_thumb(user_id):
-    """Fetches a user's custom thumbnail file_id."""
+    """Retrieves a user's custom thumbnail file_id."""
     doc = await users_col.find_one({"user_id": user_id})
     return doc.get("thumb") if doc else None
 

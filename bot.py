@@ -3,7 +3,7 @@ import os
 import time
 from pyrogram import Client, idle, enums
 import config
-from utils.db import get_settings
+from utils.db import get_settings, init_db # Updated imports
 import utils.state
 from utils.ffmpeg_utils import run_ffmpeg, take_screenshot
 from utils.progress import update_progress
@@ -18,7 +18,6 @@ app = Client(
 )
 
 def cleanup_downloads():
-    """Wipes the downloads directory on startup to prevent Heroku space leaks."""
     folder = 'downloads'
     os.makedirs(folder, exist_ok=True)
     for filename in os.listdir(folder):
@@ -51,11 +50,14 @@ async def worker():
             
             await msg.edit_text("<b>ᴘʀᴇᴘᴀʀɪɴɢ ᴇɴᴄᴏᴅᴇ...</b>")
             
+            # ---> THIS LINE CHANGED: Await the settings <---
+            settings = await get_settings() 
+            
             success = await run_ffmpeg(
                 file_path, 
                 out_path, 
                 data["selected"], 
-                get_settings(), 
+                settings, 
                 msg, 
                 task_id, 
                 data["duration"]
@@ -65,7 +67,6 @@ async def worker():
                 raise Exception("Cancelled")
 
             if success and os.path.exists(out_path):
-                # Generate Thumbnail
                 thumb_path = f"downloads/thumb_{task_id}.jpg"
                 screenshot = take_screenshot(out_path, thumb_path)
                 
@@ -73,7 +74,7 @@ async def worker():
                 await app.send_document(
                     chat_id=data["message"].chat.id,
                     document=out_path,
-                    thumb=screenshot,  # Attach auto-generated thumbnail
+                    thumb=screenshot,
                     caption="<b>✅ ᴇɴᴄᴏᴅᴇᴅ sᴜᴄᴄᴇssғᴜʟʟʏ</b>",
                     reply_to_message_id=data["message"].id,
                     progress=update_progress,
@@ -90,7 +91,6 @@ async def worker():
                 except:
                     pass
         finally:
-            # Full cleanup of ALL files related to this task
             paths_to_delete = []
             if data and "file_path" in data:
                 paths_to_delete.append(data["file_path"])
@@ -111,6 +111,9 @@ async def worker():
 
 async def main():
     cleanup_downloads()
+    # ---> THIS LINE CHANGED: Initialize DB on startup <---
+    await init_db() 
+    
     await app.start()
     asyncio.create_task(worker())
     await idle()

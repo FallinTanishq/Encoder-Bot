@@ -1,71 +1,98 @@
 from pyrogram import Client, filters
 from config import OWNER_ID
-from utils.db import get_groups, save_groups, get_presets, save_presets, get_settings, save_settings
+from utils.db import update_setting, get_settings, add_group, remove_group, get_groups
 
-@Client.on_message(filters.command("approve") & filters.user(OWNER_ID))
-async def cmd_approve(client, message):
-    g = get_groups()
-    if message.chat.id not in g:
-        g.append(message.chat.id)
-        save_groups(g)
-    await message.reply_text("<b>ᴀᴘᴘʀᴏᴠᴇᴅ.</b>")
-
-@Client.on_message(filters.command("revoke") & filters.user(OWNER_ID))
-async def cmd_revoke(client, message):
-    g = get_groups()
-    if message.chat.id in g:
-        g.remove(message.chat.id)
-        save_groups(g)
-    await message.reply_text("<b>ʀᴇᴠᴏᴋᴇᴅ.</b>")
-
-@Client.on_message(filters.command("savepreset") & filters.user(OWNER_ID))
-async def cmd_savepreset(client, message):
+@Client.on_message(filters.command("videocodec") & filters.user(OWNER_ID))
+async def set_videocodec(client, message):
     if len(message.command) < 2:
+        await message.reply_text("<b>Usage:</b> `/videocodec [codec]` (e.g., libx264, libx265)")
         return
-    name = message.command[1].lower()
-    p = get_presets()
-    p[name] = get_settings()
-    save_presets(p)
-    await message.reply_text(f"<b>ᴘʀᴇsᴇᴛ sᴀᴠᴇᴅ:</b> <code>{name}</code>")
+    codec = message.command[1]
+    await update_setting("videocodec", codec)
+    await message.reply_text(f"✅ <b>Video codec permanently set to:</b> <code>{codec}</code>")
 
-@Client.on_message(filters.command("p") & filters.user(OWNER_ID))
-async def cmd_loadpreset(client, message):
+@Client.on_message(filters.command("audiocodec") & filters.user(OWNER_ID))
+async def set_audiocodec(client, message):
     if len(message.command) < 2:
+        await message.reply_text("<b>Usage:</b> `/audiocodec [codec]` (e.g., aac, libopus)")
         return
-    name = message.command[1].lower()
-    p = get_presets()
-    if name not in p:
-        await message.reply_text("<b>ɴᴏᴛ ғᴏᴜɴᴅ.</b>")
+    codec = message.command[1]
+    await update_setting("audiocodec", codec)
+    await message.reply_text(f"✅ <b>Audio codec permanently set to:</b> <code>{codec}</code>")
+
+@Client.on_message(filters.command("preset") & filters.user(OWNER_ID))
+async def set_preset(client, message):
+    if len(message.command) < 2:
+        await message.reply_text("<b>Usage:</b> `/preset [preset]` (e.g., fast, faster, ultrafast, none)")
         return
-    save_settings(p[name])
-    s = p[name]
-    text = f"<b>ᴘʀᴇsᴇᴛ {name} ʟᴏᴀᴅᴇᴅ.</b>\n"
-    for k, v in s.items():
-        text += f"<b>{k}:</b> <code>{v}</code>\n"
+    preset = message.command[1]
+    await update_setting("preset", preset)
+    await message.reply_text(f"✅ <b>Preset permanently set to:</b> <code>{preset}</code>")
+
+@Client.on_message(filters.command("crf") & filters.user(OWNER_ID))
+async def set_crf(client, message):
+    if len(message.command) < 2:
+        await message.reply_text("<b>Usage:</b> `/crf [value]` (e.g., 28, 30, none)")
+        return
+    crf = message.command[1]
+    await update_setting("crf", crf)
+    await message.reply_text(f"✅ <b>CRF permanently set to:</b> <code>{crf}</code>")
+    
+@Client.on_message(filters.command("aspect") & filters.user(OWNER_ID))
+async def set_aspect(client, message):
+    if len(message.command) < 2:
+        await message.reply_text("<b>Usage:</b> `/aspect [resolution]` (e.g., 1280x720, none)")
+        return
+    aspect = message.command[1]
+    await update_setting("aspect", aspect)
+    await message.reply_text(f"✅ <b>Aspect ratio permanently set to:</b> <code>{aspect}</code>")
+
+@Client.on_message(filters.command("settings") & filters.user(OWNER_ID))
+async def check_settings(client, message):
+    settings = await get_settings()
+    text = "<b>🎥 Current Global Settings:</b>\n\n"
+    for key, val in settings.items():
+        if key != "_id":
+            text += f"• <b>{key}:</b> <code>{val}</code>\n"
     await message.reply_text(text)
 
-def validate_setting(k, v):
-    v = v.lower()
-    if k == "preset" and v not in ["ultrafast", "superfast", "veryfast", "faster", "fast", "medium", "slow", "slower", "veryslow"]:
-        return False
-    if k == "tune" and v not in ["film", "animation", "grain", "stillimage", "fastdecode", "zerolatency", "none"]:
-        return False
-    if k == "fps" and v != "sameassource" and not v.isdigit():
-        return False
-    if k == "aspect" and v != "none" and "x" not in v:
-        return False
-    return True
-
-@Client.on_message(filters.command(["crf", "preset", "tune", "aspect", "videocodec", "fps", "audiocodec", "bitrate"]) & filters.user(OWNER_ID))
-async def cmd_settings_set(client, message):
-    cmd = message.command[0].lower()
+@Client.on_message(filters.command("addgroup") & filters.user(OWNER_ID))
+async def cmd_addgroup(client, message):
     if len(message.command) < 2:
+        # If no ID is passed, add the current group
+        chat_id = message.chat.id
+    else:
+        try:
+            chat_id = int(message.command[1])
+        except ValueError:
+            await message.reply_text("Invalid Chat ID.")
+            return
+
+    await add_group(chat_id)
+    await message.reply_text(f"✅ <b>Group</b> <code>{chat_id}</code> <b>has been authorized.</b>")
+
+@Client.on_message(filters.command("rmgroup") & filters.user(OWNER_ID))
+async def cmd_rmgroup(client, message):
+    if len(message.command) < 2:
+        chat_id = message.chat.id
+    else:
+        try:
+            chat_id = int(message.command[1])
+        except ValueError:
+            await message.reply_text("Invalid Chat ID.")
+            return
+
+    await remove_group(chat_id)
+    await message.reply_text(f"❌ <b>Group</b> <code>{chat_id}</code> <b>authorization removed.</b>")
+
+@Client.on_message(filters.command("groups") & filters.user(OWNER_ID))
+async def list_groups(client, message):
+    groups = await get_groups()
+    if not groups:
+        await message.reply_text("No groups authorized yet.")
         return
-    val = message.text.split(None, 1)[1]
-    if not validate_setting(cmd, val):
-        await message.reply_text("<b>ɪɴᴠᴀʟɪᴅ.</b>")
-        return
-    s = get_settings()
-    s[cmd] = val
-    save_settings(s)
-    await message.reply_text(f"<b>{cmd} sᴇᴛ ᴛᴏ:</b> <code>{val}</code>")
+        
+    text = "<b>🛡 Authorized Groups:</b>\n\n"
+    for gid in groups:
+        text += f"• <code>{gid}</code>\n"
+    await message.reply_text(text)

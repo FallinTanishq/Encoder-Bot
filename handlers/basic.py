@@ -1,5 +1,4 @@
 import time
-ac
 
 from pyrogram import Client, filters
 from pyrogram.types import Message
@@ -18,7 +17,8 @@ def register(app: Client):
 
     @app.on_message(filters.command("start"))
     async def start_cmd(client, message: Message):
-        if message.chat.type.name not in ("PRIVATE",) and message.chat.id not in get_groups():
+        is_owner = message.from_user and message.from_user.id == OWNER_ID
+        if message.chat.type.name not in ("PRIVATE",) and message.chat.id not in get_groups() and not is_owner:
             return
         await message.reply_text(
             "<b>Encoder Bot</b>\n\n"
@@ -31,7 +31,8 @@ def register(app: Client):
 
     @app.on_message(filters.command("ping"))
     async def ping_cmd(client, message: Message):
-        if message.chat.type.name not in ("PRIVATE",) and message.chat.id not in get_groups():
+        is_owner = message.from_user and message.from_user.id == OWNER_ID
+        if message.chat.type.name not in ("PRIVATE",) and message.chat.id not in get_groups() and not is_owner:
             return
         start = time.time()
         sent = await message.reply_text("<b>Pinging...</b>", parse_mode="html")

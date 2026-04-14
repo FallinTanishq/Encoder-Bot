@@ -56,6 +56,24 @@ async def check_settings(client, message):
             text += f"• <b>{key}:</b> <code>{val}</code>\n"
     await message.reply_text(text)
 
+@Client.on_message(filters.command("tune") & filters.user(OWNER_ID))
+async def set_tune(client, message):
+    if len(message.command) < 2:
+        await message.reply_text(
+            "<b>Usage:</b> `/tune [value]`\n\n"
+            "<b>Common values:</b>\n"
+            "• `film` (High quality movie)\n"
+            "• `animation` (Anime/Cartoons)\n"
+            "• `grain` (Preserve film grain)\n"
+            "• `stillimage` (Slideshows)\n"
+            "• `none` (Disable tuning)"
+        )
+        return
+    
+    tune_val = message.command[1].lower()
+    await update_setting("tune", tune_val)
+    await message.reply_text(f"✅ <b>FFmpeg tune set to:</b> <code>{tune_val}</code>")
+
 @Client.on_message(filters.command(["addgroup", "approve"]) & filters.user(OWNER_ID))
 async def cmd_addgroup(client, message):
     if len(message.command) < 2:

@@ -20,6 +20,19 @@ async def set_audiocodec(client, message):
     await update_setting("audiocodec", codec)
     await message.reply_text(f"✅ <b>Audio codec permanently set to:</b> <code>{codec}</code>")
 
+@Client.on_message(filters.command("bitrate") & filters.user(OWNER_ID))
+async def set_audio_bitrate(client, message):
+    if len(message.command) < 2:
+        await message.reply_text(
+            "<b>Usage:</b> `/bitrate [value]`\n"
+            "<b>Examples:</b> `128k`, `192k`, `320k`, or `none` (source default)"
+        )
+        return
+    
+    val = message.command[1].lower()
+    await update_setting("bitrate", val)
+    await message.reply_text(f"✅ <b>Audio Bitrate set to:</b> <code>{val}</code>")
+
 @Client.on_message(filters.command("preset") & filters.user(OWNER_ID))
 async def set_preset(client, message):
     if len(message.command) < 2:

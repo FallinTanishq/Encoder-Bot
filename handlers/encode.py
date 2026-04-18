@@ -29,51 +29,78 @@ async def compress_cmd(client, message):
     auth_groups = await get_groups()
     if message.chat.id not in auth_groups and message.chat.id != OWNER_ID:
         return
-    if not message.reply_to_message or not message.reply_to_message.media:
-        await message.reply_text("<b>ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴍᴇᴅɪᴀ ᴍᴇssᴀɢᴇ.</b>")
+    
+    # Check if replied message has media
+    media_msg = message.reply_to_message
+    if not media_msg or not (media_msg.video or media_msg.document):
+        await message.reply_text("<b>ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴠɪᴅᴇᴏ ᴏʀ ᴅᴏᴄᴜᴍᴇɴᴛ.</b>")
         return
     
     task_id = str(uuid.uuid4())
     msg = await message.reply_text("<b>ɢᴇᴛᴛɪɴɢ ᴍᴇᴛᴀᴅᴀᴛᴀ... ⚡</b>")
     
     utils.state.pending_selections[task_id] = {
-        "client": client, "message": message, "media_msg": message.reply_to_message,
-        "msg": msg, "user_id": message.from_user.id, "selected": []
+        "client": client, 
+        "message": message, 
+        "media_msg": media_msg,
+        "msg": msg, 
+        "user_id": message.from_user.id, 
+        "selected": []
     }
     
     try:
         os.makedirs("downloads", exist_ok=True)
         temp_header = f"downloads/header_{task_id}.mkv"
-        async for chunk in client.stream_media(message.reply_to_message, limit=5):
-            with open(temp_header, "ab") as f: f.write(chunk)
-            if os.path.getsize(temp_header) > 5 * 1024 * 1024: break
+        
+        # Stream first 5MB to get streams/duration
+        async for chunk in client.stream_media(media_msg, limit=5):
+            with open(temp_header, "ab") as f: 
+                f.write(chunk)
+            if os.path.getsize(temp_header) > 5 * 1024 * 1024: 
+                break
         
         probe_data = await probe(temp_header)
-        if os.path.exists(temp_header): os.remove(temp_header) 
+        if os.path.exists(temp_header): 
+            os.remove(temp_header) 
             
         streams = probe_data.get("streams", [])
-        utils.state.pending_selections[task_id]["duration"] = float(probe_data.get("format", {}).get("duration", 0))
+        
+        # --- THE PROGRESS BAR KEY ---
+        # Ensure duration is captured as a float for the ETA math
+        raw_duration = probe_data.get("format", {}).get("duration", 0)
+        utils.state.pending_selections[task_id]["duration"] = float(raw_duration)
+        
         audio_streams = [s for s in streams if s.get("codec_type") == "audio"]
         utils.state.pending_selections[task_id]["audio_streams"] = audio_streams
         
         if not audio_streams:
+            # If no audio, skip selection and go straight to download
             asyncio.create_task(trigger_full_download(task_id, client))
             return
             
         kb = []
         for s in audio_streams:
             idx = s.get("index")
-            lang = s.get("tags", {}).get("language", "und")
-            btn_text = f"[ ] {lang} | {s.get('codec_name')}"
+            # Get language or default to "Track"
+            lang = s.get("tags", {}).get("language", f"Track {idx}")
+            codec = s.get('codec_name', 'unknown')
+            btn_text = f"✘ {lang.upper()} [{codec}]"
             kb.append([InlineKeyboardButton(btn_text, callback_data=f"aud_{task_id}_{idx}")])
         
         kb.append([
             InlineKeyboardButton("Select All", callback_data=f"all_{task_id}"),
-            InlineKeyboardButton("Done", callback_data=f"done_{task_id}")
+            InlineKeyboardButton("Done ✅", callback_data=f"done_{task_id}")
         ])
-        await msg.edit_text("<b>sᴇʟᴇᴄᴛ ᴀᴜᴅɪᴏ ᴛʀᴀᴄᴋs:</b>", reply_markup=InlineKeyboardMarkup(kb))
+        
+        await msg.edit_text(
+            "<b>sᴇʟᴇᴄᴛ ᴀᴜᴅɪᴏ ᴛʀᴀᴄᴋs:</b>\n<i>The selected tracks will be kept.</i>", 
+            reply_markup=InlineKeyboardMarkup(kb)
+        )
+
     except Exception as e:
-        await msg.edit_text(f"<b>ᴇʀʀᴏʀ:</b> <code>{e}</code>")
+        # Cleanup if probe fails
+        if os.path.exists(temp_header): os.remove(temp_header)
+        await msg.edit_text(f"<b>ᴇʀʀᴏʀ ɢᴇᴛᴛɪɴɢ ᴍᴇᴛᴀᴅᴀᴛᴀ:</b> <code>{e}</code>")
 
 @Client.on_callback_query(filters.regex(r"^aud_(.*)_(.*)"))
 async def toggle_audio(client, query):

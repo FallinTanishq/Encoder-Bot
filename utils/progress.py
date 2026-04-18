@@ -4,6 +4,8 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 import utils.state
 
 def format_time(seconds):
+    if seconds < 0:
+        seconds = 0
     m, s = divmod(int(seconds), 60)
     h, m = divmod(m, 60)
     if h > 0:
@@ -45,20 +47,21 @@ async def update_progress(current, total, msg, start_time, action, task_id):
     except Exception:
         pass
 
-async def encode_progress(msg, speed, fps, elapsed, left, percent, task_id):
+async def encode_progress(msg, speed, fps, eta, percent, task_id):
     now = time.time()
     if not hasattr(encode_progress, "last_update"):
         encode_progress.last_update = {}
     if now - encode_progress.last_update.get(task_id, 0) < 3.5 and percent < 100:
         return
     encode_progress.last_update[task_id] = now
-    text = (f"<b>ᴇɴᴄᴏᴅɪɴɢ ɪɴ ᴘʀᴏɢʀᴇss</b>\n"
+    
+    text = (f"<b>🎥 ᴇɴᴄᴏᴅɪɴɢ ɪɴ ᴘʀᴏɢʀᴇss...</b>\n\n"
+            f"<b>ᴇɴᴄᴏᴅᴇᴅ:</b> <code>{percent}%</code>\n"
             f"<b>sᴘᴇᴇᴅ:</b> <code>{speed}</code>\n"
-            f"<b>fps:</b> <code>{fps}</code>\n"
-            f"<b>ᴇʟᴀᴘsᴇᴅ:</b> <code>{elapsed}</code>\n"
-            f"<b>ᴛɪᴍᴇ ʟᴇғᴛ:</b> <code>{left}</code>\n"
-            f"<b>ᴘʀᴏɢʀᴇss:</b> <code>{percent}%</code>\n"
+            f"<b>fps:</b> <code>{fps} fps</code>\n"
+            f"<b>ᴇᴛᴀ:</b> <code>{format_time(eta)}</code>\n"
             f"<code>[{make_bar(float(percent))}]</code>")
+    
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("Cancel", callback_data=f"cancel_{task_id}")]])
     try:
         await msg.edit_text(text, reply_markup=kb)

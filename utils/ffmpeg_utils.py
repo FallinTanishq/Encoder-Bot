@@ -1,6 +1,5 @@
 import asyncio
 import os
-import re
 import json
 import subprocess
 import utils.state
@@ -49,7 +48,7 @@ async def run_ffmpeg(input_file, output_file, selected_audio, settings, msg, tas
     v_codec = settings.get("videocodec", "libx264")
     cmd.extend(['-c:v', v_codec])
 
-    # CRF (Quality) - Only applied if not using specific video bitrate logic
+    # CRF (Quality)
     crf = settings.get("crf", "none")
     if crf != "none":
         cmd.extend(['-crf', str(crf)])
@@ -67,7 +66,6 @@ async def run_ffmpeg(input_file, output_file, selected_audio, settings, msg, tas
     # Aspect Ratio / Scaling (Filters)
     aspect = settings.get("aspect", "none")
     if aspect != "none":
-        # Formats '1280x720' into 'scale=1280:720'
         scale_val = aspect.replace("x", ":")
         cmd.extend(['-vf', f'scale={scale_val}'])
 
@@ -77,21 +75,25 @@ async def run_ffmpeg(input_file, output_file, selected_audio, settings, msg, tas
         cmd.extend(['-r', str(fps)])
 
     # 3. Stream Mapping
-    # Always map the first video stream
-    cmd.extend(['-map', '0:v:0'])
+    cmd.extend(['-map', '0:v:0']) # Map Video
     
-    # Map selected audio streams or all if none specified
+    # Map selected audio tracks
     if selected_audio:
         for idx in selected_audio:
             cmd.extend(['-map', f'0:{idx}'])
     else:
         cmd.extend(['-map', '0:a?'])
 
+    # --- THE SUBTITLE FIX ---
+    # Map all subtitle streams and copy them untouched
+    cmd.extend(['-map', '0:s?'])
+    cmd.extend(['-c:s', 'copy'])
+
     # 4. Audio Settings
     a_codec = settings.get("audiocodec", "aac")
     cmd.extend(['-c:a', a_codec])
 
-    # Audio Bitrate (The /bitrate command logic)
+    # Audio Bitrate
     a_bitrate = settings.get("bitrate", "none")
     if a_bitrate != "none":
         cmd.extend(['-b:a', str(a_bitrate)])
@@ -108,17 +110,8 @@ async def run_ffmpeg(input_file, output_file, selected_audio, settings, msg, tas
     
     utils.state.active_process = process
 
-    # Monitor Progress (Stderr is where FFmpeg sends log output)
     try:
-        while True:
-            line = await process.stderr.readline()
-            if not line:
-                break
-            
-            # Optional: You can parse 'time=' here for live progress bars
-            # but usually, we rely on the helper in utils/progress.py
-            pass
-
+        # Wait for encoding to finish
         await process.wait()
     except Exception as e:
         print(f"FFmpeg Process Error: {e}")

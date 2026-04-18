@@ -3,6 +3,7 @@ import os
 import json
 import subprocess
 import utils.state
+from utils.progress import encode_progress
 
 async def probe(file_path):
     """
@@ -41,8 +42,8 @@ async def run_ffmpeg(input_file, output_file, selected_audio, settings, msg, tas
     Dynamically builds the command based on database settings.
     """
     
-    # 1. Input
-    cmd = ['ffmpeg', '-hide_banner', '-loglevel', 'error', '-i', input_file]
+    # 1. Input - Added -progress pipe:1 to output live stats
+    cmd = ['ffmpeg', '-hide_banner', '-loglevel', 'error', '-progress', 'pipe:1', '-i', input_file]
 
     # 2. Global Video Settings
     v_codec = settings.get("videocodec", "libx264")
@@ -70,9 +71,9 @@ async def run_ffmpeg(input_file, output_file, selected_audio, settings, msg, tas
         cmd.extend(['-vf', f'scale={scale_val}'])
 
     # FPS
-    fps = settings.get("fps", "sameassource")
-    if fps != "sameassource":
-        cmd.extend(['-r', str(fps)])
+    fps_setting = settings.get("fps", "sameassource")
+    if fps_setting != "sameassource":
+        cmd.extend(['-r', str(fps_setting)])
 
     # 3. Stream Mapping
     cmd.extend(['-map', '0:v:0']) # Map Video
@@ -109,12 +110,59 @@ async def run_ffmpeg(input_file, output_file, selected_audio, settings, msg, tas
     )
     
     utils.state.active_process = process
+    
+    # Progress Trackers
+    current_fps = "0"
+    current_speed = "0x"
+    out_time_us = 0
 
     try:
-        # Wait for encoding to finish
+        # Read standard output to parse live FFmpeg progress line-by-line
+        while True:
+            line = await process.stdout.readline()
+            if not line:
+                break
+                
+            line = line.decode('utf-8').strip()
+            
+            # Check for cancellation
+            if utils.state.cancel_flags.get(task_id):
+                process.kill()
+                raise Exception("Cancelled")
+            
+            # Parse FFmpeg key=value pairs
+            if line.startswith("fps="):
+                current_fps = line.split("=")[1].strip()
+            elif line.startswith("speed="):
+                current_speed = line.split("=")[1].strip()
+            elif line.startswith("out_time_us="):
+                try:
+                    out_time_us = int(line.split("=")[1])
+                except ValueError:
+                    pass
+            elif line.startswith("progress="):
+                # When block ends, push the progress update to the user
+                if duration > 0 and out_time_us > 0:
+                    encoded_seconds = out_time_us / 1_000_000
+                    percent = min(100.0, round((encoded_seconds / duration) * 100, 1))
+                    
+                    try:
+                        sp_val = float(current_speed.replace("x", "").strip())
+                        eta_seconds = (duration - encoded_seconds) / sp_val if sp_val > 0 else 0
+                    except Exception:
+                        eta_seconds = 0
+                        
+                    await encode_progress(msg, current_speed, current_fps, eta_seconds, percent, task_id)
+
         await process.wait()
     except Exception as e:
         print(f"FFmpeg Process Error: {e}")
+        if str(e) != "Cancelled" and process.returncode is None:
+            try:
+                process.kill()
+            except Exception:
+                pass
+        raise e
     finally:
         utils.state.active_process = None
     

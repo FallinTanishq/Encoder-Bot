@@ -16,7 +16,7 @@ async def set_thumbnail_cmd(client, message):
         await message.reply_text("<b>ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴘʜᴏᴛᴏ ᴡɪᴛʜ /t ᴛᴏ sᴇᴛ ɪᴛ ᴀs ʏᴏᴜʀ ᴛʜᴜᴍʙɴᴀɪʟ.</b>")
         return
     file_id = message.reply_to_message.photo.file_id
-    await set_thumb(message.from_user.id, file_id)
+    await set_thumb(message.from_user.id, file_id, message.chat.id, message.reply_to_message.id)
     await message.reply_text("✅ <b>Custom thumbnail saved!</b>")
 
 @Client.on_message(filters.command("delt"))
@@ -36,15 +36,26 @@ async def compress_cmd(client, message):
     task_id = str(uuid.uuid4())
     msg = await message.reply_text("<b>ɢᴇᴛᴛɪɴɢ ᴍᴇᴛᴀᴅᴀᴛᴀ... ⚡</b>")
     
+    # --- REFRESH FILE REFERENCE ---
+    # Fetch a fresh copy of the message to ensure the file reference hasn't expired
+    try:
+        target_msg = await client.get_messages(message.chat.id, message.reply_to_message.id)
+        if target_msg.empty: target_msg = message.reply_to_message
+    except Exception:
+        target_msg = message.reply_to_message
+    # ------------------------------
+        
     utils.state.pending_selections[task_id] = {
-        "client": client, "message": message, "media_msg": message.reply_to_message,
+        "client": client, "message": message, "media_msg": target_msg,
         "msg": msg, "user_id": message.from_user.id, "selected": []
     }
     
     try:
         os.makedirs("downloads", exist_ok=True)
         temp_header = f"downloads/header_{task_id}.mkv"
-        async for chunk in client.stream_media(message.reply_to_message, limit=5):
+        
+        # Streams the first 5MB using the refreshed message
+        async for chunk in client.stream_media(target_msg, limit=5):
             with open(temp_header, "ab") as f: f.write(chunk)
             if os.path.getsize(temp_header) > 5 * 1024 * 1024: break
         
@@ -114,6 +125,15 @@ async def finish_selection(client, query):
 async def trigger_full_download(task_id, client):
     data = utils.state.pending_selections[task_id]
     try:
+        # --- REFRESH FILE REFERENCE AGAIN ---
+        # If the user took a long time picking audio tracks, the reference might have expired.
+        try:
+            fresh_msg = await client.get_messages(data["message"].chat.id, data["media_msg"].id)
+            if not fresh_msg.empty: data["media_msg"] = fresh_msg
+        except Exception:
+            pass
+        # ------------------------------------
+
         file_path = await client.download_media(data["media_msg"], progress=update_progress, progress_args=(data["msg"], time.time(), "ᴅᴏᴡɴʟᴏᴀᴅɪɴɢ", task_id))
         data["file_path"] = file_path
         data = utils.state.pending_selections.pop(task_id)

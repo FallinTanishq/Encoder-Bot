@@ -16,7 +16,8 @@ async def set_thumbnail_cmd(client, message):
         await message.reply_text("<b>ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴘʜᴏᴛᴏ ᴡɪᴛʜ /t ᴛᴏ sᴇᴛ ɪᴛ ᴀs ʏᴏᴜʀ ᴛʜᴜᴍʙɴᴀɪʟ.</b>")
         return
     file_id = message.reply_to_message.photo.file_id
-    await set_thumb(message.from_user.id, file_id)
+    # Added chat_id and msg_id for file reference refreshing
+    await set_thumb(message.from_user.id, file_id, message.chat.id, message.reply_to_message.id)
     await message.reply_text("✅ <b>Custom thumbnail saved!</b>")
 
 @Client.on_message(filters.command("delt"))

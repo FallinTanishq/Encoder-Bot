@@ -3,7 +3,6 @@ import os
 import time
 from pyrogram import Client, idle, enums
 import config
-# Imported set_thumb to update expired references
 from utils.db import get_settings, init_db, get_thumb, set_thumb
 import utils.state
 from utils.ffmpeg_utils import run_ffmpeg, take_screenshot, probe, rename_encoded_file
@@ -113,8 +112,10 @@ async def worker():
                                         fresh_file_id = fresh_msg.photo.file_id
                                         # Update DB with new file reference
                                         await set_thumb(user_id, fresh_file_id, chat_id, msg_id)
-                                        # Try download again
-                                        final_thumb = await app.download_media(fresh_file_id, file_name=thumb_dl_path)
+                                        
+                                        # Fix: Pass the MESSAGE OBJECT instead of the string.
+                                        # This triggers Pyrogram's internal reference handler.
+                                        final_thumb = await app.download_media(fresh_msg, file_name=thumb_dl_path)
                                 except Exception as inner_e:
                                     print(f"Failed to refresh expired thumb: {inner_e}")
                 
@@ -149,7 +150,6 @@ async def worker():
             # Cleanup all temporary files for this task
             paths_to_delete = [final_thumb]
             
-            # Cleanly handles dynamically assigned output paths
             if 'out_path' in locals() and out_path:
                 paths_to_delete.append(out_path)
                 

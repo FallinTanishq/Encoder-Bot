@@ -3,7 +3,7 @@ import config
 
 # Initialize MongoDB Client
 client = motor.motor_asyncio.AsyncIOMotorClient(config.MONGO_URI)
-db = client["EncoderBotDB2"]
+db = client["EncoderBotDB1"]
 settings_col = db["settings"]
 groups_col = db["groups"]
 users_col = db["users"] 
@@ -51,15 +51,23 @@ async def remove_group(chat_id):
 
 # --- USER THUMBNAIL FUNCTIONS ---
 
-async def set_thumb(user_id, file_id):
-    """Saves a user's custom thumbnail file_id."""
-    await users_col.update_one({"user_id": user_id}, {"$set": {"thumb": file_id}}, upsert=True)
+async def set_thumb(user_id, file_id, chat_id=None, msg_id=None):
+    """Saves a user's custom thumbnail file_id along with context for refreshing."""
+    await users_col.update_one(
+        {"user_id": user_id}, 
+        {"$set": {
+            "thumb": file_id,
+            "thumb_chat_id": chat_id,
+            "thumb_msg_id": msg_id
+        }}, 
+        upsert=True
+    )
 
 async def get_thumb(user_id):
-    """Retrieves a user's custom thumbnail file_id."""
+    """Retrieves a user's custom thumbnail document."""
     doc = await users_col.find_one({"user_id": user_id})
-    return doc.get("thumb") if doc else None
+    return doc if doc else None
 
 async def del_thumb(user_id):
     """Deletes a user's custom thumbnail."""
-    await users_col.update_one({"user_id": user_id}, {"$unset": {"thumb": ""}})
+    await users_col.update_one({"user_id": user_id}, {"$unset": {"thumb": "", "thumb_chat_id": "", "thumb_msg_id": ""}})

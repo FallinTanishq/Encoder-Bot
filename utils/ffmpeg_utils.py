@@ -2,6 +2,7 @@ import asyncio
 import os
 import json
 import subprocess
+import re
 import utils.state
 from utils.progress import encode_progress
 
@@ -167,3 +168,38 @@ async def run_ffmpeg(input_file, output_file, selected_audio, settings, msg, tas
         utils.state.active_process = None
     
     return process.returncode == 0
+
+
+def rename_encoded_file(input_name: str, width: int, height: int) -> str:
+    """
+    Detects existing quality in filename and replaces it with the correct
+    quality based on resolution. Fallbacks to {quality}.mkv if no tags exist.
+    """
+    if height >= 2160: quality = "2160p"
+    elif height >= 1080: quality = "1080p"
+    elif height >= 720: quality = "720p"
+    elif height >= 480: quality = "480p"
+    elif height >= 360: quality = "360p"
+    else: quality = f"{height}p" if height > 0 else "480p"
+
+    name = os.path.basename(input_name)
+    name = name.replace("_out", "")
+    
+    # Strip any existing container extensions
+    name, _ = os.path.splitext(name)
+    while name.endswith(".mkv") or name.endswith(".mp4"):
+        name, _ = os.path.splitext(name)
+
+    # Prioritize resolution matches first, then source rip matches
+    res_pattern = r'(?i)(\b\d{3,4}p\b|\b4K\b|\b2K\b)'
+    source_pattern = r'(?i)(HdRip|WEBRip|BluRay)'
+
+    if re.search(res_pattern, name):
+        new_name = re.sub(res_pattern, quality, name, count=1)
+    elif re.search(source_pattern, name):
+        new_name = re.sub(source_pattern, quality, name, count=1)
+    else:
+        # Fallback if no tag was found
+        return f"{quality}.mkv"
+
+    return f"{new_name}.mkv"

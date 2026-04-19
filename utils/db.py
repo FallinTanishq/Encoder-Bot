@@ -3,7 +3,7 @@ import config
 
 # Initialize MongoDB Client
 client = motor.motor_asyncio.AsyncIOMotorClient(config.MONGO_URI)
-db = client["EncoderBotDB1"]
+db = client["EncoderBotDB2"]
 settings_col = db["settings"]
 groups_col = db["groups"]
 users_col = db["users"] 

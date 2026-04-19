@@ -3,9 +3,9 @@ import os
 import time
 from pyrogram import Client, idle, enums
 import config
-from utils.db import get_settings, init_db, get_thumb
+# Imported set_thumb to update expired references
+from utils.db import get_settings, init_db, get_thumb, set_thumb
 import utils.state
-# Added probe and rename_encoded_file to imports
 from utils.ffmpeg_utils import run_ffmpeg, take_screenshot, probe, rename_encoded_file
 from utils.progress import update_progress
 
@@ -89,16 +89,40 @@ async def worker():
                 # -------------------------
 
                 # --- THUMBNAIL LOGIC ---
-                custom_thumb_id = await get_thumb(user_id)
+                thumb_doc = await get_thumb(user_id)
+                final_thumb = None
                 
-                if custom_thumb_id:
-                    # Download the user's saved thumbnail from Telegram
+                if thumb_doc and thumb_doc.get("thumb"):
+                    custom_thumb_id = thumb_doc.get("thumb")
                     thumb_dl_path = f"downloads/custom_{task_id}.jpg"
-                    final_thumb = await app.download_media(custom_thumb_id, file_name=thumb_dl_path)
-                else:
-                    # Fallback: Generate a screenshot from the output video
+                    
+                    try:
+                        # Attempt to download the saved thumbnail
+                        final_thumb = await app.download_media(custom_thumb_id, file_name=thumb_dl_path)
+                    except Exception as e:
+                        print(f"Thumb error: {e}")
+                        # If file reference is expired, try to fetch a fresh one
+                        if "FILE_REFERENCE_EXPIRED" in str(e):
+                            chat_id = thumb_doc.get("thumb_chat_id")
+                            msg_id = thumb_doc.get("thumb_msg_id")
+                            
+                            if chat_id and msg_id:
+                                try:
+                                    fresh_msg = await app.get_messages(chat_id, msg_id)
+                                    if fresh_msg and fresh_msg.photo:
+                                        fresh_file_id = fresh_msg.photo.file_id
+                                        # Update DB with new file reference
+                                        await set_thumb(user_id, fresh_file_id, chat_id, msg_id)
+                                        # Try download again
+                                        final_thumb = await app.download_media(fresh_file_id, file_name=thumb_dl_path)
+                                except Exception as inner_e:
+                                    print(f"Failed to refresh expired thumb: {inner_e}")
+                
+                # Safe Fallback if download failed or no custom thumb
+                if not final_thumb:
                     gen_path = f"downloads/thumb_{task_id}.jpg"
                     final_thumb = take_screenshot(out_path, gen_path)
+                # -------------------------
                 
                 # Upload the final file
                 start_time = time.time()
@@ -125,7 +149,7 @@ async def worker():
             # Cleanup all temporary files for this task
             paths_to_delete = [final_thumb]
             
-            # Now cleanly handles dynamically assigned output paths
+            # Cleanly handles dynamically assigned output paths
             if 'out_path' in locals() and out_path:
                 paths_to_delete.append(out_path)
                 

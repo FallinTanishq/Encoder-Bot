@@ -5,7 +5,8 @@ from pyrogram import Client, idle, enums
 import config
 from utils.db import get_settings, init_db, get_thumb
 import utils.state
-from utils.ffmpeg_utils import run_ffmpeg, take_screenshot
+# Added probe and rename_encoded_file to imports
+from utils.ffmpeg_utils import run_ffmpeg, take_screenshot, probe, rename_encoded_file
 from utils.progress import update_progress
 
 app = Client(
@@ -64,6 +65,29 @@ async def worker():
                 raise Exception("Cancelled")
 
             if success and os.path.exists(out_path):
+                # --- AUTO-RENAME LOGIC ---
+                try:
+                    probe_data = await probe(out_path)
+                    w, h = 0, 0
+                    if "streams" in probe_data:
+                        for s in probe_data["streams"]:
+                            if s.get("codec_type") == "video":
+                                w = int(s.get("width", 0))
+                                h = int(s.get("height", 0))
+                                break
+                    
+                    new_file_name = rename_encoded_file(os.path.basename(file_path), w, h)
+                    new_out_path = os.path.join(os.path.dirname(out_path), new_file_name)
+                    
+                    if os.path.exists(new_out_path) and new_out_path != out_path:
+                        os.remove(new_out_path)
+                        
+                    os.rename(out_path, new_out_path)
+                    out_path = new_out_path # Safely reassign for the upload block
+                except Exception as e:
+                    print(f"Renaming failed: {e}")
+                # -------------------------
+
                 # --- THUMBNAIL LOGIC ---
                 custom_thumb_id = await get_thumb(user_id)
                 
@@ -100,6 +124,11 @@ async def worker():
         finally:
             # Cleanup all temporary files for this task
             paths_to_delete = [final_thumb]
+            
+            # Now cleanly handles dynamically assigned output paths
+            if 'out_path' in locals() and out_path:
+                paths_to_delete.append(out_path)
+                
             if data and "file_path" in data:
                 paths_to_delete.append(data["file_path"])
                 paths_to_delete.append(f"{data['file_path']}_out{ext}")
